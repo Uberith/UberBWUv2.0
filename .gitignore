@@ -29,3 +29,12 @@ replay_pid*
 # Gradle build outputs
 .gradle/
 build/
+
+# Local game data directory
+/GameData/
+
+# Downloaded datasets (not tracked)
+/datasets/
+
+# Local clones of external repos (not tracked)
+/external/

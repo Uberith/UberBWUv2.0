@@ -1,21 +1,18 @@
 package botwithus
 
 import net.botwithus.scripts.Info
-import net.botwithus.scripts.Script
 import net.botwithus.ui.workspace.Workspace
-import java.lang.Thread.sleep
+import net.botwithus.drj.SuspendableScript
 
 @Info(name = "FlaxPicker", description = "Simple flax picking example.", version = "1.0.0", author = "YourName")
-class FlaxPicker : Script() {
+class FlaxPicker : SuspendableScript() {
 
     override fun onDraw(workspace: Workspace) {
         super.onDraw(workspace)
     }
 
-    override fun run() {
-        println("FlaxPicker running...")
-        // Placeholder – add movement/banking/state logic via API
-        sleep(1000)
+    override suspend fun onLoop() {
+        // TODO: add movement/banking/state logic via API
     }
 
     override fun onActivation() {
@@ -28,4 +25,3 @@ class FlaxPicker : Script() {
         println("FlaxPicker deactivated.")
     }
 }
-

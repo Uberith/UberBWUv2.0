@@ -1,13 +1,12 @@
 package botwithus
 
 import net.botwithus.scripts.Info
-import net.botwithus.scripts.Script
 import net.botwithus.ui.workspace.Workspace
-import java.lang.Thread.sleep
+import net.botwithus.drj.SuspendableScript
 
 
 @Info(name = "ScriptSkeleton", description = "A skeleton script.", version = "1.0.0", author = "YourName")
-class ScriptSkeleton : Script() {
+class ScriptSkeleton : SuspendableScript() {
 
     private val scriptGUI = ScriptSkeletonGUI(this)
 
@@ -16,11 +15,8 @@ class ScriptSkeleton : Script() {
         scriptGUI.render(workspace)
     }
 
-    override fun run() {
-        println("Running main script logic...")
-        // Implement loop or state machine as needed
-        // Example: simple tick
-        sleep(1000)
+    override suspend fun onLoop() {
+        // Implement loop or state machine as needed using wait()/waitUntil()
     }
 
     override fun onActivation() {
@@ -37,4 +33,3 @@ class ScriptSkeleton : Script() {
         super.onInitialize()
     }
 }
-
