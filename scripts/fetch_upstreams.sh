@@ -7,10 +7,14 @@ set -euo pipefail
 OUT_DIR="external"
 API_REPO="https://github.com/BotWithUs/BotWithUs-V2-API.git"
 XAPI_REPO="https://github.com/BotWithUs/BotWithUs-V2-XAPI.git"
+# Also fetch the Uberith public repo with additional content
+UBERBW_REPO="https://github.com/Uberith/UberBWUv2.git"
 
 # Override branches via env, defaults to default branch of origin
 API_REF="${API_REF:-}"
 XAPI_REF="${XAPI_REF:-}"
+# Optional: pin UberBWUv2 to a branch/tag/commit via UBERBW_REF
+UBERBW_REF="${UBERBW_REF:-}"
 
 mkdir -p "$OUT_DIR"
 
@@ -40,6 +44,7 @@ clone_or_update() {
 
 clone_or_update "$API_REPO" "BotWithUs-V2-API" "$API_REF"
 clone_or_update "$XAPI_REPO" "BotWithUs-V2-XAPI" "$XAPI_REF"
+clone_or_update "$UBERBW_REPO" "UberBWUv2" "$UBERBW_REF"
 
 echo "Done. Local copies in $OUT_DIR/." >&2
 

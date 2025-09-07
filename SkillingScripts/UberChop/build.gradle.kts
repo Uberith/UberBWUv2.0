@@ -29,7 +29,9 @@ dependencies {
 // Disable tests to avoid variant resolution on testRuntimeClasspath
 tasks.withType<Test>().configureEach { enabled = false }
 
-// Package script-api compiled classes (directory) into this jar
+// Build jar and include script-api classes; allow root copy task to run
 tasks.named<Jar>("jar").configure {
+    enabled = true
     from(embedScriptApi)
 }
+tasks.matching { it.name == "copyJar" }.configureEach { enabled = true }

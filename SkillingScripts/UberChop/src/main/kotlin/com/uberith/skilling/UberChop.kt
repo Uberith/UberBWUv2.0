@@ -12,9 +12,9 @@ import java.util.regex.Pattern
 
 @Info(
     name = "UberChop",
-    description = "Woodcutting script built on SuspendableScript",
+    description = "Smart RS3 woodcutting: targets trees, chops, optional banking.",
     version = "0.1.0",
-    author = "YourName"
+    author = "Uberith"
 )
 class UberChop : SuspendableScript() {
 
