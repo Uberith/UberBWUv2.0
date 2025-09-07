@@ -36,5 +36,15 @@
       <option name="name" value="maven3" />
       <option name="url" value="https://nexus.botwithus.net/repository/maven-public/" />
     </remote-repository>
+    <remote-repository>
+      <option name="id" value="maven4" />
+      <option name="name" value="maven4" />
+      <option name="url" value="file:/$PROJECT_DIR$/../../../Lewis%20Matlock/IdeaProjects/UberBWUv2.0/external/maven" />
+    </remote-repository>
+    <remote-repository>
+      <option name="id" value="maven4" />
+      <option name="name" value="maven4" />
+      <option name="url" value="file:/$PROJECT_DIR$/../../../Lewis%20Matlock/IdeaProjects/UberBWUv2.0/external/maven/" />
+    </remote-repository>
   </component>
 </project>

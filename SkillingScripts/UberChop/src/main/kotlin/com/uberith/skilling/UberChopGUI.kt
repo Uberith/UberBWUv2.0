@@ -1,46 +1,43 @@
 package com.uberith.skilling
 
-import net.botwithus.rs3.imgui.ImGui
-import net.botwithus.rs3.imgui.ImGuiWindowFlag
+import net.botwithus.imgui.ImGui
 import net.botwithus.ui.workspace.Workspace
 import java.awt.image.BufferedImage
 import javax.imageio.ImageIO
 
 class UberChopGUI(private val script: UberChop) {
 
-    // Lazy-loaded logo texture id via reflection when available
+    // Logo support: detect image API once; if absent, skip images quietly
     private var logoTexId: Long? = null
-    private var triedLoadLogo = false
+    private var imageApiChecked = false
+    private var imageLoadMethod: java.lang.reflect.Method? = null
+    private var imageDrawMethod: java.lang.reflect.Method? = null
 
     // Simple nav state
     private var selectedTab: String = "Settings"
 
     fun render(workspace: Workspace) {
-        ImGui.SetNextWindowSize(800f, 600f, ImGuiWindowFlag.AlwaysAutoResize.value)
-        if (ImGui.Begin("UberChop", ImGuiWindowFlag.AlwaysAutoResize.value)) {
+        if (ImGui.begin("UberChop", 0)) {
             drawBanner()
 
             // Top controls
-            if (ImGui.Button("Start")) script.requestStart()
+            if (ImGui.button("Start", 0f, 0f)) script.requestStart()
             if (script.userPaused) {
-                if (ImGui.Button("Resume")) script.resume()
+                if (ImGui.button("Resume", 0f, 0f)) script.resume()
             } else {
-                if (ImGui.Button("Pause")) script.pause()
+                if (ImGui.button("Pause", 0f, 0f)) script.pause()
             }
 
-            ImGui.Separator()
+            ImGui.separator()
 
             // Left navigation
-            ImGui.Text("Navigation")
-            if (ImGui.Button("Settings")) selectedTab = "Settings"
-            ImGui.SameLine()
-            if (ImGui.Button("Statistics")) selectedTab = "Statistics"
-            ImGui.SameLine()
-            if (ImGui.Button("Advanced")) selectedTab = "Advanced"
-            ImGui.SameLine()
-            if (ImGui.Button("Debug")) selectedTab = "Debug"
+            ImGui.text("Navigation")
+            if (ImGui.button("Settings", 0f, 0f)) selectedTab = "Settings"
+            if (ImGui.button("Statistics", 0f, 0f)) selectedTab = "Statistics"
+            if (ImGui.button("Advanced", 0f, 0f)) selectedTab = "Advanced"
+            if (ImGui.button("Debug", 0f, 0f)) selectedTab = "Debug"
 
-            ImGui.Separator()
+            ImGui.separator()
 
             when (selectedTab) {
                 "Settings" -> drawSettingsTab()
@@ -49,80 +46,76 @@ class UberChopGUI(private val script: UberChop) {
                 "Debug" -> drawDebugTab()
             }
 
-            ImGui.Separator()
-            ImGui.Text("Phase: ${script.phase}")
-            ImGui.Text("Status: ${script.status}")
-            ImGui.Text("Logs: ${script.logsChopped}")
+            ImGui.separator()
+            ImGui.text("Phase: ${script.phase}")
+            ImGui.text("Status: ${script.status}")
+            ImGui.text("Logs: ${script.logsChopped}")
         }
-        ImGui.End()
+        ImGui.end()
     }
 
     private fun drawSettingsTab() {
         // Tree selection
         var nameBuffer = script.targetTree
-        nameBuffer = ImGui.InputTextWithHint("Tree", "Tree/Oak/Willow/Yew/Magic", nameBuffer, 0)
+        nameBuffer = ImGui.inputTextWithHint("Tree", "Tree/Oak/Willow/Yew/Magic", nameBuffer, 0)
         script.targetTree = if (nameBuffer.isBlank()) "Tree" else nameBuffer
 
         // Location selection (cycle through known locations)
         val locs = script.locationNames()
         var idx = script.selectedLocationIndex
-        ImGui.Text("Location: ${locs.getOrNull(idx) ?: "Any"}")
-        if (ImGui.Button("Prev Location")) {
+        ImGui.text("Location: ${locs.getOrNull(idx) ?: "Any"}")
+        if (ImGui.button("Prev Location", 0f, 0f)) {
             idx = if (idx <= 0) locs.size - 1 else idx - 1
             script.selectedLocationIndex = idx
         }
-        ImGui.SameLine()
-        if (ImGui.Button("Next Location")) {
+        if (ImGui.button("Next Location", 0f, 0f)) {
             idx = if (idx >= locs.size - 1) 0 else idx + 1
             script.selectedLocationIndex = idx
         }
 
         // Banking option
         var bank = script.bankWhenFull
-        bank = ImGui.Checkbox("Bank When Full", bank)
+        bank = ImGui.checkbox("Bank When Full", bank)
         script.bankWhenFull = bank
     }
 
     private fun drawStatisticsTab() {
-        ImGui.Text("Runtime: ${script.formattedRuntime()}")
-        ImGui.Text("Logs chopped: ${script.logsChopped}")
-        ImGui.Text("Logs/hr: ${script.logsPerHour()}")
+        ImGui.text("Runtime: ${script.formattedRuntime()}")
+        ImGui.text("Logs chopped: ${script.logsChopped}")
+        ImGui.text("Logs/hr: ${script.logsPerHour()}")
     }
 
     private fun drawAdvancedTab() {
-        ImGui.Text("Advanced options coming soon")
-        ImGui.Text("- Banking pathing (WIP)")
-        ImGui.Text("- Tile navigation (WIP)")
+        ImGui.text("Advanced options coming soon")
+        ImGui.text("- Banking pathing (WIP)")
+        ImGui.text("- Tile navigation (WIP)")
     }
 
     private fun drawDebugTab() {
         val t = script.peekNearestTree()
         if (t != null) {
-            ImGui.Text("Nearest: ${t.name}")
+            ImGui.text("Nearest: ${t.name}")
         } else {
-            ImGui.Text("Nearest: none")
+            ImGui.text("Nearest: none")
         }
     }
 
     private fun drawBanner() {
-        if (!triedLoadLogo) {
-            triedLoadLogo = true
+        ensureImageApiChecked()
+        if (logoTexId == null && imageLoadMethod != null) {
             logoTexId = tryLoadLogoTex()
         }
         val tex = logoTexId
-        if (tex != null && tex != 0L) {
-            // Try reflectively calling ImGui.image(long, float, float)
+        if (tex != null && tex != 0L && imageDrawMethod != null) {
             try {
-                val m = ImGui::class.java.getMethod("Image", java.lang.Long.TYPE, java.lang.Float.TYPE, java.lang.Float.TYPE)
-                m.invoke(null, tex, 260f, 60f)
+                imageDrawMethod!!.invoke(null, tex, 260f, 60f)
             } catch (_: Throwable) {
-                // Fallback to title text if images unsupported
-                ImGui.Text("UberChop")
+                ImGui.text("UberChop")
             }
         } else {
-            ImGui.Text("UberChop")
+            ImGui.text("UberChop")
         }
-        ImGui.Separator()
+        ImGui.separator()
     }
 
     private fun tryLoadLogoTex(): Long? {
@@ -130,23 +123,21 @@ class UberChopGUI(private val script: UberChop) {
             val stream = this::class.java.classLoader.getResourceAsStream("images/Uberith_Logo_Full_Text.png")
                 ?: return null
             val img: BufferedImage = ImageIO.read(stream) ?: return null
-            // Try both rs3 ImGui and generic ImGui for texture loading
-            val clazzes = listOf(
-                try { Class.forName("net.botwithus.rs3.imgui.ImGui") } catch (_: Throwable) { null },
-                ImGui::class.java
-            ).filterNotNull()
-            for (c in clazzes) {
-                try {
-                    val load = c.getMethod("LoadTexture", BufferedImage::class.java)
-                    val tex = load.invoke(null, img) as? Long
-                    if (tex != null && tex != 0L) return tex
-                } catch (_: Throwable) {
-                    // try next
-                }
-            }
-            null
+            val m = imageLoadMethod ?: return null
+            val tex = m.invoke(null, img) as? Long
+            if (tex != null && tex != 0L) tex else null
+        } catch (_: Throwable) { null }
+    }
+
+    private fun ensureImageApiChecked() {
+        if (imageApiChecked) return
+        imageApiChecked = true
+        try {
+            imageLoadMethod = ImGui::class.java.getMethod("loadTexture", BufferedImage::class.java)
+            imageDrawMethod = ImGui::class.java.getMethod("image", java.lang.Long.TYPE, java.lang.Float.TYPE, java.lang.Float.TYPE)
         } catch (_: Throwable) {
-            null
+            imageLoadMethod = null
+            imageDrawMethod = null
         }
     }
 }

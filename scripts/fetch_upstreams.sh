@@ -46,5 +46,46 @@ clone_or_update "$API_REPO" "BotWithUs-V2-API" "$API_REF"
 clone_or_update "$XAPI_REPO" "BotWithUs-V2-XAPI" "$XAPI_REF"
 clone_or_update "$UBERBW_REPO" "UberBWUv2" "$UBERBW_REF"
 
-echo "Done. Local copies in $OUT_DIR/." >&2
+# Download selected Maven artifacts (e.g., ImGui) for offline/local use under external/maven
+# Configure version via IMGUI_VERSION, defaults to a known recent.
+IMGUI_VERSION="${IMGUI_VERSION:-1.0.2-20250818.161536-3}"
+IMGUI_COORD_GROUP="net/botwithus/imgui"
+IMGUI_ARTIFACT="imgui"
+MAVEN_BASES=(
+  "https://nexus.botwithus.net/repository/maven-releases"
+  "https://nexus.botwithus.net/repository/maven-snapshots"
+  "https://nexus.botwithus.net/repository/maven-public"
+)
 
+download_artifact() {
+  local group_path="$1"; shift
+  local artifact="$1"; shift
+  local version="$1"; shift
+  local dest_base="$OUT_DIR/maven/$group_path/$artifact/$version"
+  mkdir -p "$dest_base"
+  local jar="$artifact-$version.jar"
+  local pom="$artifact-$version.pom"
+  for base in "${MAVEN_BASES[@]}"; do
+    local jar_url="$base/$group_path/$artifact/$version/$jar"
+    local pom_url="$base/$group_path/$artifact/$version/$pom"
+    echo "Attempting $jar_url" >&2
+    if curl -fsSL "$jar_url" -o "$dest_base/$jar"; then
+      echo "Saved $dest_base/$jar" >&2
+      curl -fsSL "$pom_url" -o "$dest_base/$pom" || true
+      return 0
+    fi
+  done
+  echo "WARN: Failed to download $artifact:$version from configured repos" >&2
+  return 1
+}
+
+download_artifact "$IMGUI_COORD_GROUP" "$IMGUI_ARTIFACT" "$IMGUI_VERSION" || true
+
+# Also copy the jar to a flat directory for flatDir resolution
+mkdir -p "$OUT_DIR/lib"
+if [[ -f "$OUT_DIR/maven/$IMGUI_COORD_GROUP/$IMGUI_ARTIFACT/$IMGUI_VERSION/$IMGUI_ARTIFACT-$IMGUI_VERSION.jar" ]]; then
+  cp -f "$OUT_DIR/maven/$IMGUI_COORD_GROUP/$IMGUI_ARTIFACT/$IMGUI_VERSION/$IMGUI_ARTIFACT-$IMGUI_VERSION.jar" \
+        "$OUT_DIR/lib/$IMGUI_ARTIFACT-$IMGUI_VERSION.jar"
+fi
+
+echo "Done. Local copies in $OUT_DIR/." >&2

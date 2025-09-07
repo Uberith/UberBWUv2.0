@@ -4,6 +4,17 @@ plugins {
     kotlin("jvm") version "2.2.0" apply false
 }
 
+// Repositories for root project (used by detached configurations/tasks like cacheImGui)
+repositories {
+    mavenCentral()
+    maven("https://nexus.botwithus.net/repository/maven-releases/")
+    maven("https://nexus.botwithus.net/repository/maven-snapshots/")
+    maven("https://nexus.botwithus.net/repository/maven-public/")
+    // Local fallbacks for offline use
+    maven { url = uri(layout.projectDirectory.dir("external/maven").asFile.toURI()) }
+    flatDir { dirs(layout.projectDirectory.dir("external/lib").asFile) }
+}
+
 subprojects {
     apply(plugin = "org.jetbrains.kotlin.jvm")
 
@@ -15,6 +26,9 @@ subprojects {
         maven("https://nexus.botwithus.net/repository/maven-releases/")
         maven("https://nexus.botwithus.net/repository/maven-snapshots/")
         maven("https://nexus.botwithus.net/repository/maven-public/")
+        // Local fallback repos for offline use
+        maven { url = uri(rootProject.layout.projectDirectory.dir("external/maven").asFile.toURI()) }
+        flatDir { dirs(rootProject.layout.projectDirectory.dir("external/lib").asFile) }
     }
 
     // Java toolchain for JDK 24 (runtime), compile to Java 21 bytecode for Kotlin compatibility
@@ -105,6 +119,33 @@ subprojects {
     tasks.matching { it.name == "compileKotlin" || it.name == "compileJava" }.configureEach {
         rootProject.tasks.named("strictCompile").configure {
             dependsOn(this@configureEach)
+        }
+    }
+}
+
+// Task to resolve net.botwithus.imgui:imgui and copy the jar to external for offline use
+val cacheImGui by tasks.registering(Copy::class) {
+    group = "dependency cache"
+    description = "Resolves net.botwithus.imgui:imgui and copies jar into external/maven and external/lib"
+    val imguiVersion = (findProperty("imgui.version") as String?)
+        ?: (findProperty("IMGUI_VERSION") as String?)
+        ?: "1.0.2-20250818.161536-3"
+    val dep = dependencies.create("net.botwithus.imgui:imgui:$imguiVersion")
+    val cfg = configurations.detachedConfiguration(dep).also { it.isTransitive = false }
+    val files = cfg.resolve()
+    val jar = files.firstOrNull()
+    if (jar != null) {
+        val groupPath = "net/botwithus/imgui"
+        val destMaven = layout.projectDirectory.dir("external/maven/$groupPath/imgui/$imguiVersion").asFile
+        val destFlat = layout.projectDirectory.dir("external/lib").asFile
+        from(jar)
+        into(destMaven)
+        doLast {
+            destFlat.mkdirs()
+            copy {
+                from(jar)
+                into(destFlat)
+            }
         }
     }
 }
