@@ -1,5 +1,6 @@
 plugins {
     // Apply but don't activate; subprojects will apply Kotlin JVM
+    // Note: plugin version must be a constant or resolved via pluginManagement; keep in sync with kotlin.version
     kotlin("jvm") version "2.2.0" apply false
 }
 
@@ -16,15 +17,15 @@ subprojects {
         maven("https://nexus.botwithus.net/repository/maven-public/")
     }
 
-    // Java toolchain for JDK 24 (matches upstream API)
+    // Java toolchain for JDK 24 (runtime), compile to Java 21 bytecode for Kotlin compatibility
     extensions.configure<org.gradle.api.plugins.JavaPluginExtension> {
         toolchain.languageVersion.set(JavaLanguageVersion.of(24))
     }
 
-    // Ensure Java targets JDK 24 bytecode
+    // Ensure Java targets Java 21 bytecode (Kotlin 2.2 max target is JVM_21)
     tasks.withType<JavaCompile>().configureEach {
-        // Use JDK 24 toolchain and target Java 24 bytecode
-        options.release.set(24)
+        // Use JDK 24 toolchain and target Java 21 bytecode
+        options.release.set(21)
     }
 
     // Kotlin bytecode target. Kotlin 2.2 maximum is JVM_21; this runs fine on JDK 24.
@@ -40,7 +41,7 @@ subprojects {
         jvmToolchain(24)
     }
 
-    // Make dependency resolution request JVM 24 variants to match upstream BotWithUs artifacts
+    // Request JVM 24 variants to match upstream BotWithUs artifacts while compiling our code to 21 bytecode.
     configurations.matching { it.name in setOf(
         "compileClasspath",
         "runtimeClasspath",
@@ -71,9 +72,25 @@ subprojects {
         finalizedBy(copyJar)
     }
 
-    // Add Gradle API to all modules as requested
+    // Kotlin BOM + force alignment to a single version across the build
+    val kotlinVersion = (findProperty("kotlin.version") as String?) ?: "2.2.0"
+
+    configurations.configureEach {
+        resolutionStrategy {
+            // Force a single Kotlin on the classpath to avoid metadata mismatches
+            force(
+                "org.jetbrains.kotlin:kotlin-stdlib:$kotlinVersion",
+                "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlinVersion",
+                "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlinVersion",
+                "org.jetbrains.kotlin:kotlin-reflect:$kotlinVersion"
+            )
+        }
+    }
+
+    // Add Gradle API to all modules and align Kotlin libs via BOM
     dependencies {
         add("implementation", gradleApi())
+        add("implementation", platform("org.jetbrains.kotlin:kotlin-bom:$kotlinVersion"))
     }
 }
 
