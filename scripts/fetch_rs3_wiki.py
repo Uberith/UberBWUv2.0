@@ -5,25 +5,74 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+import urllib.error
 from typing import Dict, Any, List
 
 BASE = "https://runescape.wiki/w/api.php"
 UA = "UberBWUv2.0-fetch/1.0 (RS3 wiki archival; contact: local dev)"
 OUT_DIR = os.path.join("datasets", "rs3", "wiki")
 
+# Allow alternate endpoints and pacing/backoff via env.
+# Comma-separated list, first is preferred. Defaults include classic alt path.
+ENDPOINTS = [
+    e.strip()
+    for e in os.environ.get(
+        "RS3_WIKI_ENDPOINTS", f"{BASE},https://runescape.wiki/api.php"
+    ).split(",")
+    if e.strip()
+]
+MAX_RETRIES = max(1, int(os.environ.get("RS3_MAX_RETRIES", "5")))
+BACKOFF_BASE = float(os.environ.get("RS3_BACKOFF_BASE", "0.75"))  # seconds
+BACKOFF_FACTOR = float(os.environ.get("RS3_BACKOFF_FACTOR", "1.75"))
+BACKOFF_JITTER = float(os.environ.get("RS3_BACKOFF_JITTER", "0.25"))
+REQUEST_DELAY = float(os.environ.get("RS3_REQUEST_DELAY", "0.0"))  # per-request delay
 
-def http_get(params: Dict[str, Any], attempt: int = 1) -> Dict[str, Any]:
+
+def http_get(params: Dict[str, Any]) -> Dict[str, Any]:
+    """GET with retries, endpoint fallback, and backoff.
+
+    - Tries each endpoint in ENDPOINTS for each attempt window.
+    - Honors 429 Retry-After when present.
+    - Applies exponential backoff with jitter between attempts.
+    - Optional per-request pacing via REQUEST_DELAY.
+    """
+    import random
+    last_err: Exception | None = None
+    attempt = 0
     qs = urllib.parse.urlencode(params)
-    req = urllib.request.Request(f"{BASE}?{qs}", headers={"User-Agent": UA})
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            data = resp.read()
-            return json.loads(data)
-    except Exception as e:
-        if attempt < 3:
-            time.sleep(1.5 * attempt)
-            return http_get(params, attempt + 1)
-        raise e
+    while attempt < MAX_RETRIES:
+        attempt += 1
+        for base in ENDPOINTS:
+            url = f"{base}?{qs}"
+            req = urllib.request.Request(url, headers={"User-Agent": UA})
+            try:
+                if REQUEST_DELAY > 0:
+                    time.sleep(REQUEST_DELAY)
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    data = resp.read()
+                    return json.loads(data)
+            except urllib.error.HTTPError as he:  # type: ignore[attr-defined]
+                last_err = he
+                # Respect 429 Too Many Requests
+                if he.code == 429:
+                    retry_after = he.headers.get("Retry-After") if hasattr(he, "headers") else None
+                    try:
+                        wait_s = float(retry_after) if retry_after else 5.0
+                    except Exception:
+                        wait_s = 5.0
+                    time.sleep(wait_s)
+                    continue
+            except Exception as e:
+                last_err = e
+                # Try next endpoint in list
+                continue
+        # If we exhausted endpoints for this attempt, backoff before next round
+        sleep_s = BACKOFF_BASE * (BACKOFF_FACTOR ** (attempt - 1)) + random.uniform(0, BACKOFF_JITTER)
+        time.sleep(sleep_s)
+    # Out of retries
+    if last_err:
+        raise last_err
+    raise RuntimeError("http_get: failed without captured exception")
 
 
 def list_category_members(category: str, limit: int = 10000) -> List[Dict[str, Any]]:
@@ -219,6 +268,8 @@ def main() -> int:
         titles = titles[:max_pages]
 
     # Fetch content for each title (wikitext + HTML)
+    burst = max(1, int(os.environ.get("RS3_BURST_SIZE", "8")))
+    burst_sleep = float(os.environ.get("RS3_BURST_SLEEP", "1.5"))
     for i, title in enumerate(titles):
         name = safe_name(title)
         meta_path = os.path.join(pages_dir, f"{name}.meta.json")
@@ -234,9 +285,9 @@ def main() -> int:
         except Exception as e:
             # Skip on failure, continue
             index["fetched"].append({"title": title, "error": str(e)})
-        # Respectful pacing
-        if (i + 1) % 10 == 0:
-            time.sleep(0.5)
+        # Respectful pacing (configurable burst pacing)
+        if (i + 1) % burst == 0:
+            time.sleep(burst_sleep)
 
     write_json(os.path.join(OUT_DIR, "index.json"), index)
     return 0

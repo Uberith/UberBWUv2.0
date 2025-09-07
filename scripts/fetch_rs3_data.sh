@@ -8,6 +8,11 @@ OUT_DIR="datasets/rs3"
 LOG_FILE="$OUT_DIR/fetch.log"
 UA="UberBWUv2.0-fetch/1.0 (+https://runescape.wiki; contact: local dev)"
 
+# Configurable pacing and alternate wiki endpoints (comma-separated)
+RS3_DELAY="${RS3_DELAY:-0.8}"
+RS3_WIKI_ENDPOINTS="${RS3_WIKI_ENDPOINTS:-https://runescape.wiki/w/api.php,https://runescape.wiki/api.php}"
+IFS=',' read -r -a CARGO_ENDPOINTS <<< "$RS3_WIKI_ENDPOINTS"
+
 mkdir -p "$OUT_DIR/wiki" "$OUT_DIR/itemdb" "$OUT_DIR/hiscores"
 
 log() {
@@ -18,7 +23,13 @@ curl_json() {
   local url="$1"
   local out="$2"
   log "GET $url -> $out"
-  curl -fsSL --retry 3 --retry-delay 2 -A "$UA" "$url" -o "$out" || {
+  curl -fsSL \
+    --retry 5 \
+    --retry-all-errors \
+    --retry-delay 2 \
+    --max-time 60 \
+    --connect-timeout 10 \
+    -A "$UA" "$url" -o "$out" || {
     log "WARN: failed $url"
     return 1
   }
@@ -29,8 +40,19 @@ cargo_query() {
   local out="$OUT_DIR/wiki/$name.json"
   local q
   q=$(printf "%s" "$*" | tr ' ' '&')
-  local url="https://runescape.wiki/w/api.php?action=cargoquery&format=json&formatversion=2&${q}"
-  curl_json "$url" "$out" || true
+  local ok=0
+  for base in "${CARGO_ENDPOINTS[@]}"; do
+    local url="${base}?action=cargoquery&format=json&formatversion=2&${q}"
+    if curl_json "$url" "$out"; then
+      ok=1
+      break
+    fi
+  done
+  # Pacing between queries
+  sleep "$RS3_DELAY"
+  if [[ "$ok" -eq 0 ]]; then
+    log "WARN: all endpoints failed for cargo query: $name"
+  fi
 }
 
 log "Starting RS3 data fetch into $OUT_DIR"
