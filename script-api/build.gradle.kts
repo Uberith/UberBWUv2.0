@@ -8,3 +8,32 @@ dependencies {
     // Logging API; provided by platform, no need to package
     compileOnly("org.slf4j:slf4j-api:2.0.9")
 }
+
+// Do not produce or copy a jar for this module
+tasks.named<Jar>("jar").configure {
+    enabled = false
+}
+tasks.matching { it.name == "copyJar" }.configureEach {
+    enabled = false
+}
+
+// Still publish compiled classes to consumers so project dependencies work
+val sourceSets = extensions.getByName("sourceSets") as org.gradle.api.tasks.SourceSetContainer
+val mainSourceSet = sourceSets.getByName("main")
+
+val publishClasses = tasks.register<Sync>("publishClasses") {
+    from(mainSourceSet.output)
+    into(layout.buildDirectory.dir("published-classes"))
+}
+
+val classesElements by configurations.creating {
+    isCanBeConsumed = true
+    isCanBeResolved = false
+    attributes.attribute(org.gradle.api.attributes.Usage.USAGE_ATTRIBUTE, objects.named(org.gradle.api.attributes.Usage.JAVA_API))
+    attributes.attribute(org.gradle.api.attributes.Category.CATEGORY_ATTRIBUTE, objects.named(org.gradle.api.attributes.Category.LIBRARY))
+    attributes.attribute(org.gradle.api.attributes.LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(org.gradle.api.attributes.LibraryElements.CLASSES))
+    val publishedDir = layout.buildDirectory.dir("published-classes")
+    outgoing.artifact(publishedDir) {
+        builtBy(publishClasses)
+    }
+}
