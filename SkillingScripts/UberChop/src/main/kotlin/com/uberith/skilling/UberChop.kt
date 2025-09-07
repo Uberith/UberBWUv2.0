@@ -8,7 +8,6 @@ import net.botwithus.rs3.entities.SceneObject
 import net.botwithus.rs3.entities.LocalPlayer
 import net.botwithus.rs3.inventories.InventoryManager
 import java.util.Locale
-import java.util.regex.Pattern
 
 @Info(
     name = "UberChop",
