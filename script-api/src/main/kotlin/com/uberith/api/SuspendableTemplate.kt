@@ -1,4 +1,4 @@
-package com.uberith
+package com.uberith.api
 
 import com.uberith.api.SuspendableScript
 import net.botwithus.scripts.Info
