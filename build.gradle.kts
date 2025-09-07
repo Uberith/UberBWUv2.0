@@ -6,7 +6,7 @@ plugins {
 subprojects {
     apply(plugin = "org.jetbrains.kotlin.jvm")
 
-    group = "com.botwithus.examples"
+    group = "com.uberith"
     version = "1.0.0-SNAPSHOT"
 
     repositories {
@@ -31,6 +31,7 @@ subprojects {
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_24)
+            allWarningsAsErrors.set(true)
         }
     }
 
@@ -68,5 +69,25 @@ subprojects {
         from({ includeInJar.map { zipTree(it) } })
         duplicatesStrategy = DuplicatesStrategy.EXCLUDE
         finalizedBy(copyJar)
+    }
+
+    // Add Gradle API to all modules as requested
+    dependencies {
+        add("implementation", gradleApi())
+    }
+}
+
+// Aggregate task to fail fast on any compile error across subprojects
+val strictCompile = tasks.register("strictCompile") {
+    group = "verification"
+    description = "Compiles all subprojects (Kotlin/Java) to fail fast on errors."
+}
+
+// Wire each subproject's main compile tasks into the aggregate
+subprojects {
+    tasks.matching { it.name == "compileKotlin" || it.name == "compileJava" }.configureEach {
+        rootProject.tasks.named("strictCompile").configure {
+            dependsOn(this@configureEach)
+        }
     }
 }

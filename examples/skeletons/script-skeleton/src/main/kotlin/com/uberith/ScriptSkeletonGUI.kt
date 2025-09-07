@@ -1,7 +1,8 @@
-package botwithus
+package com.uberith
 
 import net.botwithus.imgui.ImGui
 import net.botwithus.ui.workspace.Workspace
+import com.uberith.ScriptSkeleton
 
 class ScriptSkeletonGUI(private val script: ScriptSkeleton) {
 
@@ -18,4 +19,3 @@ class ScriptSkeletonGUI(private val script: ScriptSkeleton) {
         ImGui.end()
     }
 }
-

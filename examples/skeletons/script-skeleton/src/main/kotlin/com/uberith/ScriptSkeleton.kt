@@ -1,8 +1,8 @@
-package botwithus
+package com.uberith
 
 import net.botwithus.scripts.Info
 import net.botwithus.ui.workspace.Workspace
-import net.botwithus.drj.SuspendableScript
+import com.uberith.api.SuspendableScript
 
 
 @Info(name = "ScriptSkeleton", description = "A skeleton script.", version = "1.0.0", author = "YourName")
