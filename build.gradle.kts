@@ -16,21 +16,21 @@ subprojects {
         maven("https://nexus.botwithus.net/repository/maven-public/")
     }
 
-    // Java toolchain for JDK 24 (compile and target Java 24)
+    // Java toolchain for JDK 24 (matches upstream API)
     extensions.configure<org.gradle.api.plugins.JavaPluginExtension> {
         toolchain.languageVersion.set(JavaLanguageVersion.of(24))
     }
 
-    // Ensure both Java and Kotlin compile to the same target (24)
+    // Ensure Java targets JDK 24 bytecode
     tasks.withType<JavaCompile>().configureEach {
         // Use JDK 24 toolchain and target Java 24 bytecode
         options.release.set(24)
     }
 
-    // Kotlin bytecode target (runs on JDK 24)
+    // Kotlin bytecode target. Kotlin 2.2 maximum is JVM_21; this runs fine on JDK 24.
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
         compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_24)
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
             allWarningsAsErrors.set(true)
         }
     }
@@ -40,7 +40,7 @@ subprojects {
         jvmToolchain(24)
     }
 
-    // Make dependency resolution request JVM 24 variants
+    // Make dependency resolution request JVM 24 variants to match upstream BotWithUs artifacts
     configurations.matching { it.name in setOf(
         "compileClasspath",
         "runtimeClasspath",
