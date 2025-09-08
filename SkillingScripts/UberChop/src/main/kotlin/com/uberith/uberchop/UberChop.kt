@@ -48,6 +48,8 @@ class UberChop : SuspendableScript() {
         log.info("UberChop activated")
         status = "Active - Preparing"
         phase = Phase.PREPARING
+        // Preload GUI assets (e.g., logo texture)
+        try { gui.preload() } catch (_: Throwable) {}
         if (startEpochMs == 0L) startEpochMs = System.currentTimeMillis()
     }
 

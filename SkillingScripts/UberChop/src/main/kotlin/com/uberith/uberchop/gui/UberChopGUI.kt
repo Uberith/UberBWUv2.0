@@ -3,13 +3,23 @@ package com.uberith.uberchop.gui
 import com.uberith.uberchop.UberChop
 import net.botwithus.imgui.ImGui
 import net.botwithus.ui.workspace.Workspace
+import java.io.ByteArrayOutputStream
+import javax.imageio.ImageIO
 
 class UberChopGUI(private val script: UberChop) {
     // 0 Overview, 1 Core, 2 Handlers, 3 WorldHop, 4 Advanced, 5 Statistics, 6 Support
     private var selectedTab: Int = 0
     private val FIXED_W = 560f
-    private val FIXED_H = 520f
-    private val CONTENT_H = 400f
+    private val FIXED_H = 620f
+    private val CONTENT_H = 520f
+
+    // Textures (loaded once, freed on demand)
+    private var logoImg: Long = 0L
+    private var texturesLoaded = false
+    fun preload() {
+        unloadTextures()
+        loadTextures()
+    }
 
     private fun adjustInt(label: String, value: Int, min: Int, max: Int, step: Int = 1): Int {
         ImGui.text(label)
@@ -29,7 +39,8 @@ class UberChopGUI(private val script: UberChop) {
         if (ImGui.begin("UberChop", 0)) {
             val cm = ColorManager()
             cm.pushColors()
-            // Top summary (compact)
+            // Top logo + summary
+            drawLogoBar()
             ImGui.text("Runtime ${script.formattedRuntime()}  |  Logs ${script.logsChopped} (${script.logsPerHour()}/h)  |  Status ${script.status}")
             ImGui.separator()
 
@@ -37,25 +48,20 @@ class UberChopGUI(private val script: UberChop) {
             val navW = 120f
             if (ImGui.beginChild("LeftNav", navW, CONTENT_H, true, 0)) {
                 val navCount = 7
-                val btnH = 28f
-                val navGap = ((CONTENT_H - navCount * btnH) / (navCount + 1)).coerceAtLeast(6f)
+                val fudge = 12f // extra safety to avoid scrollbar
+                val available = CONTENT_H - fudge
+                // No vertical spacing between buttons; compute height to fill column
+                // Reduce height further to ensure no scrollbar (trim 8px), keep clickable minimum
+                val btnH = ((available / navCount) - 8f).coerceAtLeast(18f)
                 val rightPad = 22f
 
-                drawNavSpacer(navGap)
                 drawNavItem(0, "Overview", navW, cm, btnH, rightPad)
-                drawNavSpacer(navGap)
                 drawNavItem(1, "Core", navW, cm, btnH, rightPad)
-                drawNavSpacer(navGap)
                 drawNavItem(2, "Handlers", navW, cm, btnH, rightPad)
-                drawNavSpacer(navGap)
                 drawNavItem(3, "WorldHop", navW, cm, btnH, rightPad)
-                drawNavSpacer(navGap)
                 drawNavItem(4, "Advanced", navW, cm, btnH, rightPad)
-                drawNavSpacer(navGap)
                 drawNavItem(5, "Statistics", navW, cm, btnH, rightPad)
-                drawNavSpacer(navGap)
                 drawNavItem(6, "Support", navW, cm, btnH, rightPad)
-                drawNavSpacer(navGap)
             }
             ImGui.endChild()
 
@@ -93,6 +99,99 @@ class UberChopGUI(private val script: UberChop) {
             cm.popColors()
         }
         ImGui.end()
+    }
+
+    private fun drawLogoBar() {
+        if (!texturesLoaded) { unloadTextures(); loadTextures() }
+        if (ImGui.beginChild("LogoBar", 0f, 56f, false, 0)) {
+            if (logoImg != 0L) {
+                // Render via reflection against known ImGui classes
+                if (!tryInvokeImGuiImage(logoImg, 220f, 44f)) ImGui.text("Uberith")
+            } else {
+                ImGui.text("Uberith")
+            }
+        }
+        ImGui.endChild()
+    }
+
+    // External-style helpers for images
+    private fun loadImage(path: String): ByteArray? {
+        return try {
+            javaClass.classLoader.getResourceAsStream(path)?.use { stream ->
+                val image = ImageIO.read(stream)
+                ByteArrayOutputStream().use { baos ->
+                    ImageIO.write(image, "png", baos)
+                    baos.toByteArray()
+                }
+            }
+        } catch (_: Throwable) { null }
+    }
+
+    private fun loadTextures() {
+        try {
+            if (logoImg == 0L) {
+                loadImage("images/Uberith_Logo_Full_Text.png")?.let { bytes ->
+                    loadTexture(bytes)?.let { logoImg = it }
+                }
+            }
+            // Only the Uberith logo is required. Do not attempt non-existent images.
+        } finally {
+            texturesLoaded = true
+        }
+    }
+
+    private fun unloadTextures() {
+        if (logoImg != 0L) {
+            freeTexture(logoImg)
+            logoImg = 0L
+        }
+    }
+
+    private fun loadTexture(bytes: ByteArray): Long? {
+        val classes = arrayOf("net.botwithus.imgui.ImGui", "net.botwithus.rs3.imgui.ImGui")
+        for (cn in classes) {
+            try {
+                val cls = Class.forName(cn)
+                val m = cls.getMethod("loadTexture", ByteArray::class.java)
+                val id = (m.invoke(null, bytes) as? Long) ?: 0L
+                if (id != 0L) return id
+            } catch (_: Throwable) { }
+        }
+        return null
+    }
+
+    private fun freeTexture(id: Long) {
+        val classes = arrayOf("net.botwithus.imgui.ImGui", "net.botwithus.rs3.imgui.ImGui")
+        for (cn in classes) {
+            try {
+                val cls = Class.forName(cn)
+                val m = cls.getMethod("freeTexture", java.lang.Long.TYPE)
+                m.invoke(null, id)
+                return
+            } catch (_: Throwable) { }
+        }
+    }
+
+    private fun tryInvokeImGuiImage(texId: Long, w: Float, h: Float): Boolean {
+        val classes = arrayOf("net.botwithus.imgui.ImGui", "net.botwithus.rs3.imgui.ImGui")
+        for (cn in classes) {
+            try {
+                val cls = Class.forName(cn)
+                // Try Image(Long, float, float)
+                try {
+                    val m = cls.getMethod("Image", java.lang.Long.TYPE, java.lang.Float.TYPE, java.lang.Float.TYPE)
+                    m.invoke(null, texId, w, h)
+                    return true
+                } catch (_: Throwable) { }
+                // Try image(long, float, float)
+                try {
+                    val m = cls.getMethod("image", java.lang.Long.TYPE, java.lang.Float.TYPE, java.lang.Float.TYPE)
+                    m.invoke(null, texId, w, h)
+                    return true
+                } catch (_: Throwable) { }
+            } catch (_: Throwable) { }
+        }
+        return false
     }
 
     private fun header(title: String, cm: ColorManager) {
@@ -141,9 +240,9 @@ class UberChopGUI(private val script: UberChop) {
         }
     }
 
-    private fun drawNavSpacer(height: Float) {
-        // Create vertical space using an empty child of specified height
-        ImGui.beginChild("NavSpacer_${System.nanoTime()}", 0f, height, false, 0)
+    private fun drawNavSpacer(height: Float, id: Int) {
+        // Create vertical space using an empty child of specified height (stable ID to avoid rebuild churn)
+        ImGui.beginChild("NavSpacer_$id", 0f, height, false, 0)
         ImGui.endChild()
     }
 
@@ -358,4 +457,3 @@ class UberChopGUI(private val script: UberChop) {
         } catch (_: Throwable) { "N/A" }
     }
 }
-

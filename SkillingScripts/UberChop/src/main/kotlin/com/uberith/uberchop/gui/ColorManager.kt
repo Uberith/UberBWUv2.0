@@ -24,52 +24,54 @@ class ColorManager {
         DragDropTarget(50), NavHighlight(51), NavWindowingHighlight(52), NavWindowingDimBg(53), ModalWindowDimBg(54),
     }
 
-    // Public accent colors (modern indigo palette)
-    val accent = intArrayOf(99, 102, 241, 255)         // Indigo 500
-    val accentHover = intArrayOf(129, 140, 248, 255)   // Indigo 400
-    val accentActive = intArrayOf(79, 70, 229, 255)    // Indigo 600
+    // Public accent colors (sleek modern blue palette)
+    // Neutral slate base + blue accent (accessible, professional)
+    val accent = intArrayOf(59, 130, 246, 255)         // Blue 500 (#3B82F6)
+    val accentHover = intArrayOf(96, 165, 250, 255)    // Blue 400 (#60A5FA)
+    val accentActive = intArrayOf(37, 99, 235, 255)    // Blue 600 (#2563EB)
 
     init { setDefaultColors() }
 
     private fun setDefaultColors() {
-        // Palette aligned with external UberChop ColorManager
-        // Slightly lightened primary text for readability
-        colorMap[ColorType.Text] = intArrayOf(245, 248, 255, 255)
-        colorMap[ColorType.TextSecondary] = intArrayOf(170, 120, 50, 255)
-        colorMap[ColorType.TextDisabled] = intArrayOf(120, 120, 120, 255)
-        colorMap[ColorType.TextSelectedBg] = intArrayOf(30, 60, 120, 200)
+        // Base colors for sleek slate-on-dark theme
+        colorMap[ColorType.Text] = intArrayOf(229, 231, 235, 255)          // Gray-200: high contrast on dark
+        colorMap[ColorType.TextSecondary] = intArrayOf(156, 163, 175, 255) // Gray-400
+        colorMap[ColorType.TextDisabled] = intArrayOf(107, 114, 128, 255)  // Gray-500
+        colorMap[ColorType.TextSelectedBg] = intArrayOf(30, 58, 138, 160)  // Blue-800 overlay
 
-        // Partially transparent surfaces for modern overlay feel
-        colorMap[ColorType.WindowBg] = intArrayOf(10, 20, 50, 170)
-        // Slightly darker child background for depth behind content panels
-        colorMap[ColorType.ChildBg] = intArrayOf(12, 18, 45, 140)
-        colorMap[ColorType.PopupBg] = intArrayOf(20, 30, 70, 180)
+        // Transparent dark surfaces (charcoal/slate)
+        colorMap[ColorType.WindowBg] = intArrayOf(17, 24, 39, 200)         // Gray-900 @ ~78% alpha
+        colorMap[ColorType.ChildBg] = intArrayOf(31, 41, 55, 170)          // Gray-800 @ ~67% alpha
+        colorMap[ColorType.PopupBg] = intArrayOf(31, 41, 55, 200)
         // Title bar transparency to match window
-        colorMap[ColorType.TitleBg] = intArrayOf(10, 20, 50, 175)
-        colorMap[ColorType.TitleBgActive] = intArrayOf(10, 20, 50, 190)
-        colorMap[ColorType.TitleBgCollapsed] = intArrayOf(10, 20, 50, 160)
-        // More pronounced border and drop shadow for readability on busy backgrounds
-        colorMap[ColorType.Border] = intArrayOf(120, 140, 200, 230) // soft indigo-tinted border, higher alpha
-        colorMap[ColorType.BorderShadow] = intArrayOf(8, 8, 16, 170) // darker, stronger shadow
+        colorMap[ColorType.TitleBg] = intArrayOf(17, 24, 39, 205)
+        colorMap[ColorType.TitleBgActive] = intArrayOf(17, 24, 39, 220)
+        colorMap[ColorType.TitleBgCollapsed] = intArrayOf(17, 24, 39, 190)
+        // Subtle border and drop shadow
+        colorMap[ColorType.Border] = intArrayOf(55, 65, 81, 220)           // Gray-700
+        colorMap[ColorType.BorderShadow] = intArrayOf(3, 7, 18, 160)       // Near-black soft shadow
 
-        colorMap[ColorType.FrameBg] = intArrayOf(30, 70, 90, 255)
-        colorMap[ColorType.FrameBgHovered] = intArrayOf(50, 110, 140, 255)
-        colorMap[ColorType.FrameBgActive] = intArrayOf(70, 150, 180, 255)
+        // Frames and sliders
+        colorMap[ColorType.FrameBg] = intArrayOf(31, 41, 55, 255)          // Gray-800
+        // Subtle blue glow for focus affordance on inputs/sliders
+        colorMap[ColorType.FrameBgHovered] = intArrayOf(30, 64, 175, 180)  // Blue-700 @ ~70% alpha
+        colorMap[ColorType.FrameBgActive] = intArrayOf(37, 99, 235, 200)   // Blue-600 @ ~78% alpha
 
-        colorMap[ColorType.ScrollbarBg] = intArrayOf(15, 20, 40, 200)
-        colorMap[ColorType.ScrollbarGrab] = intArrayOf(80, 110, 180, 255)
-        colorMap[ColorType.ScrollbarGrabHovered] = intArrayOf(100, 140, 200, 255)
-        colorMap[ColorType.ScrollbarGrabActive] = intArrayOf(120, 160, 220, 255)
+        // Scrollbars
+        colorMap[ColorType.ScrollbarBg] = intArrayOf(17, 24, 39, 200)
+        colorMap[ColorType.ScrollbarGrab] = intArrayOf(59, 130, 246, 200)  // Blue 500 translucent
+        colorMap[ColorType.ScrollbarGrabHovered] = intArrayOf(96, 165, 250, 220)
+        colorMap[ColorType.ScrollbarGrabActive] = intArrayOf(37, 99, 235, 240)
 
-        // Modern accent for buttons (indigo)
+        // Buttons with teal accent and legible text
         colorMap[ColorType.ButtonText] = intArrayOf(255, 255, 255, 255)
         colorMap[ColorType.Button] = accent
         colorMap[ColorType.ButtonHovered] = accentHover
         colorMap[ColorType.ButtonActive] = accentActive
 
-        colorMap[ColorType.CheckMark] = intArrayOf(255, 240, 160, 255)
-        colorMap[ColorType.SliderGrab] = intArrayOf(150, 200, 255, 255)
-        colorMap[ColorType.SliderGrabActive] = intArrayOf(180, 220, 255, 255)
+        colorMap[ColorType.CheckMark] = accent
+        colorMap[ColorType.SliderGrab] = accentHover
+        colorMap[ColorType.SliderGrabActive] = accentActive
 
         // Accent headers and separators for cohesion
         colorMap[ColorType.Header] = accent
