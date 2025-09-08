@@ -4,9 +4,14 @@ dependencies {
 
     // BotWithUs runtime provides these; depend at compile time only
     compileOnly("net.botwithus.api:api:1.2.2-20250823.233014-1")
+    compileOnly("net.botwithus.imgui:imgui:1.0.2-20250818.161536-3")
+    compileOnly("net.botwithus.xapi.public:api:1.1.9")
 
     // Logging API; provided by platform, no need to package
     compileOnly("org.slf4j:slf4j-api:2.0.17")
+
+    // Persistence helpers
+    implementation("com.google.code.gson:gson:2.10.1")
 }
 
 // Do not produce or copy a jar for this module
