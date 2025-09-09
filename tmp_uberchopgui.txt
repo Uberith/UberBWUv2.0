@@ -16,7 +16,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
     private val CONTENT_H = 455f
 
     // Textures (loaded once, freed on demand)
-    private var logoImg: Any? = null
+    private var logoImg: Long = 0L
     private var logoBytesSize: Int = 0
     private var logoLoadSource: String = ""
     private val log = LoggerFactory.getLogger(UberChopGUI::class.java)
@@ -117,11 +117,11 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
 
     private fun drawLogoBar() {
         // Ensure we (re)attempt loading on the render thread where the UI context is valid
-        if (logoImg == null) { loadTextures() }
+        if (logoImg == 0L) { loadTextures() }
         if (ImGui.beginChild("LogoBar", 0f, 56f, false, 0)) {
-            if (logoImg != null) {
+            if (logoImg != 0L) {
                 // Render via shared utility for consistency
-                CustomImages().renderImage(logoImg as Any, 220f, 44f)
+                CustomImages().renderImage(logoImg, 220f, 44f)
             } else {
                 // Fallback text title when no texture API or image not loaded yet
                 ImGui.text("Uberith")
@@ -246,7 +246,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
     }
 
     private fun loadTextures() {
-        if (logoImg != null) return
+        if (logoImg != 0L) return
         // Skip if no image/texture API is exposed by current ImGui runtime
         if (!hasImGuiImageApi()) {
             // No image rendering available in current runtime; skip quietly
@@ -254,16 +254,16 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         }
         loadImage("images/Uberith_Logo_Full_Text.png")?.let { bytes ->
             logoBytesSize = bytes.size
-            val tex1 = loadTexture(bytes)
-            if (tex1 != null) {
-                logoImg = tex1
+            val id1 = loadTexture(bytes)
+            if (id1 != null && id1 != 0L) {
+                logoImg = id1
                 return
             }
             // As a fallback, try re-encoding via ImageIO to normalize PNGs
             reencodePng(bytes)?.let { normalized ->
-                val tex2 = loadTexture(normalized)
-                if (tex2 != null) {
-                    logoImg = tex2
+                val id2 = loadTexture(normalized)
+                if (id2 != null && id2 != 0L) {
+                    logoImg = id2
                     return
                 }
             }
@@ -282,13 +282,13 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
     }
 
     private fun unloadTextures() {
-        if (logoImg != null) {
-            freeTexture(logoImg as Any)
-            logoImg = null
+        if (logoImg != 0L) {
+            freeTexture(logoImg)
+            logoImg = 0L
         }
     }
 
-    private fun loadTexture(bytes: ByteArray): Any? {
+    private fun loadTexture(bytes: ByteArray): Long? {
         val classes = arrayOf(
             "net.botwithus.imgui.ImGui",
             "net.botwithus.rs3.imgui.ImGui",
@@ -324,22 +324,16 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                 try {
                     val m = cls.getMethod(mn, ByteArray::class.java)
                     val res = m.invoke(null, bytes)
-                    when (res) {
-                        is Number -> if (res.toLong() != 0L) return res
-                        null -> {}
-                        else -> return res // texture-like object
-                    }
+                    val id = (res as? Number)?.toLong() ?: 0L
+                    if (id != 0L) return id
                 } catch (_: Throwable) { }
                 // Try (ByteBuffer)
                 if (directBuf != null) {
                     try {
                         val m = cls.getMethod(mn, java.nio.ByteBuffer::class.java)
                         val res = m.invoke(null, directBuf)
-                        when (res) {
-                            is Number -> if (res.toLong() != 0L) return res
-                            null -> {}
-                            else -> return res
-                        }
+                        val id = (res as? Number)?.toLong() ?: 0L
+                        if (id != 0L) return id
                     } catch (_: Throwable) { }
                 }
             }
@@ -353,11 +347,8 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                         if (arg != null) {
                             try {
                                 val res = m.invoke(null, arg)
-                                when (res) {
-                                    is Number -> if (res.toLong() != 0L) return res
-                                    null -> {}
-                                    else -> return res
-                                }
+                                val id = (res as? Number)?.toLong() ?: 0L
+                                if (id != 0L) return id
                             } catch (_: Throwable) { }
                         }
                     }
@@ -391,11 +382,8 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                         try {
                             val m = cls.getMethod(mn, String::class.java)
                             val res = m.invoke(null, ls)
-                            when (res) {
-                                is Number -> if (res.toLong() != 0L) return res
-                                null -> {}
-                                else -> return res
-                            }
+                            val id = (res as? Number)?.toLong() ?: 0L
+                            if (id != 0L) return id
                         } catch (_: Throwable) { }
                     }
                     // (java.net.URL)
@@ -403,22 +391,16 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                         try {
                             val m = cls.getMethod(mn, java.net.URL::class.java)
                             val res = m.invoke(null, urlSelf)
-                            when (res) {
-                                is Number -> if (res.toLong() != 0L) return res
-                                null -> {}
-                                else -> return res
-                            }
+                            val id = (res as? Number)?.toLong() ?: 0L
+                            if (id != 0L) return id
                         } catch (_: Throwable) { }
                     }
                     // (InputStream)
                     try {
                         val m = cls.getMethod(mn, java.io.InputStream::class.java)
                         val res = bytes.inputStream().use { ins -> m.invoke(null, ins) }
-                        when (res) {
-                            is Number -> if (res.toLong() != 0L) return res
-                            null -> {}
-                            else -> return res
-                        }
+                        val id = (res as? Number)?.toLong() ?: 0L
+                        if (id != 0L) return id
                     } catch (_: Throwable) { }
                 }
             }
@@ -471,41 +453,29 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                         try {
                             val m = cls.getMethod(mn, bufCls, intCls, intCls)
                             val res = m.invoke(null, buf, w, h)
-                            when (res) {
-                                is Number -> if (res.toLong() != 0L) return res
-                                null -> {}
-                                else -> return res
-                            }
+                            val id = (res as? Number)?.toLong() ?: 0L
+                            if (id != 0L) return id
                         } catch (_: Throwable) { }
                         // Try (int, int, ByteBuffer)
                         try {
                             val m = cls.getMethod(mn, intCls, intCls, bufCls)
                             val res = m.invoke(null, w, h, buf)
-                            when (res) {
-                                is Number -> if (res.toLong() != 0L) return res
-                                null -> {}
-                                else -> return res
-                            }
+                            val id = (res as? Number)?.toLong() ?: 0L
+                            if (id != 0L) return id
                         } catch (_: Throwable) { }
                         // Try (long, long, ByteBuffer) in case of long sizes
                         try {
                             val m = cls.getMethod(mn, longCls, longCls, bufCls)
                             val res = m.invoke(null, w.toLong(), h.toLong(), buf)
-                            when (res) {
-                                is Number -> if (res.toLong() != 0L) return res
-                                null -> {}
-                                else -> return res
-                            }
+                            val id = (res as? Number)?.toLong() ?: 0L
+                            if (id != 0L) return id
                         } catch (_: Throwable) { }
                         // Try (ByteBuffer, float, float)
                         try {
                             val m = cls.getMethod(mn, bufCls, floatCls, floatCls)
                             val res = m.invoke(null, buf, w.toFloat(), h.toFloat())
-                            when (res) {
-                                is Number -> if (res.toLong() != 0L) return res
-                                null -> {}
-                                else -> return res
-                            }
+                            val id = (res as? Number)?.toLong() ?: 0L
+                            if (id != 0L) return id
                         } catch (_: Throwable) { }
                     }
                     // Signature-agnostic sweep: any static method with ByteBuffer + (int|long) + (int|long)
@@ -535,11 +505,8 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                                         if (p[i] == intCls || p[i] == longCls || p[i] == floatCls) { args[i] = if (args[i] == w || args[i] == w.toLong() || args[i] == w.toFloat()) h else args[i] }
                                     }
                                     val res = m.invoke(null, *args)
-                                    when (res) {
-                                        is Number -> if (res.toLong() != 0L) return res
-                                        null -> {}
-                                        else -> return res
-                                    }
+                                    val id = (res as? Number)?.toLong() ?: 0L
+                                    if (id != 0L) return id
                                 } catch (_: Throwable) { }
                             }
                         }
@@ -549,6 +516,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         } catch (_: Throwable) { }
 
         // Suppress noisy reflection diagnostics in production; keep UI clean if texture API is absent
+        
         return null
     }
 
@@ -568,15 +536,22 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         return false
     }
 
-    private fun freeTexture(tex: Any) {
+    private fun freeTexture(id: Long) {
         val classes = arrayOf("net.botwithus.imgui.ImGui", "net.botwithus.rs3.imgui.ImGui")
         val methodNames = arrayOf("freeTexture", "deleteTexture", "destroyTexture")
         for (cn in classes) {
             val cls = try { Class.forName(cn) } catch (_: Throwable) { null } ?: continue
             for (mn in methodNames) {
-                try { cls.getMethod(mn, java.lang.Long.TYPE).invoke(null, (tex as? Number)?.toLong() ?: return); return } catch (_: Throwable) { }
-                try { cls.getMethod(mn, java.lang.Integer.TYPE).invoke(null, (tex as? Number)?.toInt() ?: return); return } catch (_: Throwable) { }
-                try { cls.getMethod(mn, Any::class.java).invoke(null, tex); return } catch (_: Throwable) { }
+                try {
+                    val m = cls.getMethod(mn, java.lang.Long.TYPE)
+                    m.invoke(null, id)
+                    return
+                } catch (_: Throwable) { }
+                try {
+                    val m = cls.getMethod(mn, java.lang.Integer.TYPE)
+                    m.invoke(null, id.toInt())
+                    return
+                } catch (_: Throwable) { }
             }
         }
     }
@@ -866,3 +841,4 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         } catch (_: Throwable) { "N/A" }
     }
 }
+
