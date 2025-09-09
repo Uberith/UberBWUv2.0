@@ -45,6 +45,11 @@ class UberChop : SuspendableScript() {
 
     override fun onActivation() {
         super.onActivation()
+        // Initialize targetTree from saved settings
+        try {
+            val idx = settings.savedTreeType.coerceIn(0, TreeTypes.ALL.size - 1)
+            targetTree = TreeTypes.ALL[idx]
+        } catch (_: Throwable) { /* keep default */ }
         log.info("UberChop activated")
         status = "Active - Preparing"
         phase = Phase.PREPARING

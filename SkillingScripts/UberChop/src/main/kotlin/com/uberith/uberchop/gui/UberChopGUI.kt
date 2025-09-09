@@ -14,6 +14,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
     private val FIXED_W = 560f
     private val FIXED_H = 620f
     private val CONTENT_H = 455f
+    // Target tree selection will use a true Combo box (dropdown)
 
     // Textures (loaded once, freed on demand)
     private var logoImg: Any? = null
@@ -662,15 +663,19 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         ImGui.separator()
         ImGui.text("Target Tree:")
         ImGui.sameLine(0f, 6f)
-        if (ImGui.button("Tree", 58f, 0f)) script.targetTree = "Tree"
-        ImGui.sameLine(0f, 4f)
-        if (ImGui.button("Oak", 54f, 0f)) script.targetTree = "Oak"
-        ImGui.sameLine(0f, 4f)
-        if (ImGui.button("Willow", 64f, 0f)) script.targetTree = "Willow"
-        ImGui.sameLine(0f, 4f)
-        if (ImGui.button("Yew", 54f, 0f)) script.targetTree = "Yew"
-        ImGui.sameLine(0f, 4f)
-        if (ImGui.button("Magic", 64f, 0f)) script.targetTree = "Magic"
+        val allTrees = com.uberith.uberchop.TreeTypes.ALL
+        val currentIdx = script.settings.savedTreeType.coerceIn(0, allTrees.size - 1)
+        val currentName = allTrees[currentIdx]
+        if (ImGui.beginCombo("##targetTreeCombo", currentName, 0)) {
+            for (i in allTrees.indices) {
+                val isSelected = (i == currentIdx)
+                if (ImGui.selectable(allTrees[i], isSelected, 0, 0f, 0f)) {
+                    script.settings.savedTreeType = i
+                    script.targetTree = allTrees[i]
+                }
+            }
+            ImGui.endCombo()
+        }
 
         ImGui.separator()
         ImGui.text("Log Handling:")
