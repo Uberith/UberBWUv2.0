@@ -10,6 +10,6 @@ module UberChop.main {
     requires static java.desktop;
 
     opens com.uberith.uberchop to BotWithUs.api; // needed for event annotations
-
+    // Declare service provider so ServiceLoader can discover this script on the module path
     provides net.botwithus.scripts.Script with com.uberith.uberchop.UberChop;
 }

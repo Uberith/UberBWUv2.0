@@ -123,9 +123,8 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                 // Render via shared utility for consistency
                 CustomImages().renderImage(logoImg, 220f, 44f)
             } else {
+                // Fallback text title when no texture API or image not loaded yet
                 ImGui.text("Uberith")
-                ImGui.sameLine(0f, 8f)
-                ImGui.text("[logo bytes=$logoBytesSize id=${logoImg} src=${logoLoadSource}]")
             }
         }
         ImGui.endChild()
@@ -248,6 +247,11 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
 
     private fun loadTextures() {
         if (logoImg != 0L) return
+        // Skip if no image/texture API is exposed by current ImGui runtime
+        if (!hasImGuiImageApi()) {
+            // No image rendering available in current runtime; skip quietly
+            return
+        }
         loadImage("images/Uberith_Logo_Full_Text.png")?.let { bytes ->
             logoBytesSize = bytes.size
             val id1 = loadTexture(bytes)
@@ -511,36 +515,25 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             }
         } catch (_: Throwable) { }
 
-        // As a last step, log available static methods for debugging in the client log
-        try {
-            val inspect = arrayOf(
-                "net.botwithus.imgui.ImGui",
-                "net.botwithus.rs3.imgui.ImGui",
-                "net.botwithus.client.imgui.ImGui"
-            )
-            for (cn in inspect) {
-                try {
-                    val cls = Class.forName(cn)
-                    val methods = cls.methods.filter { java.lang.reflect.Modifier.isStatic(it.modifiers) }
-                    val interesting = methods.filter { m ->
-                        val n = m.name.lowercase()
-                        n.contains("texture") || n.contains("image") || n.contains("upload")
-                    }.joinToString(", ") { m ->
-                        val params = m.parameterTypes.joinToString(";") { it.simpleName }
-                        "${m.name}(${params}) -> ${m.returnType.simpleName}"
-                    }
-                    if (interesting.isNotEmpty()) {
-                        log.warn("ImGui class {} static methods: {}", cn, interesting)
-                    } else {
-                        log.warn("ImGui class {} has no obvious texture methods", cn)
-                    }
-                } catch (t: Throwable) {
-                    log.warn("Could not inspect class {}: {}", cn, t.toString())
-                }
-            }
-        } catch (_: Throwable) { }
-
+        // Suppress noisy reflection diagnostics in production; keep UI clean if texture API is absent
+        
         return null
+    }
+
+    private fun hasImGuiImageApi(): Boolean {
+        val candidates = arrayOf("net.botwithus.imgui.ImGui", "net.botwithus.rs3.imgui.ImGui")
+        for (cn in candidates) {
+            try {
+                val cls = Class.forName(cn)
+                // Look for an image draw method signature commonly used
+                val m1 = cls.methods.firstOrNull {
+                    java.lang.reflect.Modifier.isStatic(it.modifiers) && it.name.equals("Image", true) &&
+                        it.parameterCount == 3 && it.parameterTypes[0] == java.lang.Long.TYPE
+                }
+                if (m1 != null) return true
+            } catch (_: Throwable) { }
+        }
+        return false
     }
 
     private fun freeTexture(id: Long) {

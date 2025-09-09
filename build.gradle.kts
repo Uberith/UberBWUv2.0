@@ -46,6 +46,7 @@ allprojects {
             }
 
             toolchain {
+                // Align with platform dependencies that require JDK 24
                 languageVersion.set(JavaLanguageVersion.of(24))
             }
         }
@@ -62,9 +63,11 @@ allprojects {
             add("includeInJar", "net.botwithus.xapi:xapi:2.0.+")
 
             if (hasKotlin) {
-                implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.0")
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.1")
-                testImplementation("org.jetbrains.kotlin:kotlin-test:2.2.0")
+                // Do not bundle stdlib; platform provides it. Keep it only for compile.
+                compileOnly(kotlin("stdlib"))
+                // Use the Jvm variant to avoid duplicate module names on the module path
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.7.1")
+                testImplementation(kotlin("test"))
             }
         }
     }
@@ -80,10 +83,24 @@ allprojects {
 
         tasks.withType<KotlinCompile>().configureEach {
             compilerOptions {
+                // Emit Kotlin 1.9 metadata while compiling on JDK 24
+                languageVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_1_9)
+                apiVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_1_9)
+
                 jvmTarget.set(JvmTarget.JVM_24)
                 freeCompilerArgs.add("-Xjdk-release=24")
             }
         }
+
+        // Ensure module-info.java (Java) sees Kotlin classes like com.uberith.uberchop.UberChop
+        tasks.named<JavaCompile>("compileJava") {
+            dependsOn(tasks.named("compileKotlin"))
+        }
+    }
+
+    // Avoid bringing both kotlinx-coroutines-core and -core-jvm onto the module path
+    configurations.configureEach {
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
     }
 
     if (hasSources) {
