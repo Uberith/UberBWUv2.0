@@ -14,13 +14,9 @@ dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
 }
 
-// Do not copy a jar for this module (but allow building a jar for project dependencies)
-tasks.named<Jar>("jar").configure {
-    enabled = true
-}
-tasks.matching { it.name == "copyJar" }.configureEach {
-    enabled = false
-}
+// Build jar for shading into UberChop, but do not copy to scripts
+tasks.named<Jar>("jar").configure { enabled = true }
+tasks.matching { it.name == "copyJar" }.configureEach { enabled = false }
 
 // Still publish compiled classes to consumers so project dependencies work
 val sourceSets = extensions.getByName("sourceSets") as org.gradle.api.tasks.SourceSetContainer

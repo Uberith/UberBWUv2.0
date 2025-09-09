@@ -1,6 +1,6 @@
 module UberChop.main {
     requires kotlin.stdlib;
-    requires UberScriptAPI.main;
+    requires static UberScriptAPI.main; // compile-time only; shaded into this jar
     requires BotWithUs.api;
     requires BotWithUs.imgui;
     requires BotWithUs.navigation.api;

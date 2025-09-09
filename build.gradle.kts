@@ -87,10 +87,14 @@ allprojects {
     }
 
     if (hasSources) {
-    tasks.withType<Jar>().configureEach {
-        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-        from(configurations["includeInJar"].map { zipTree(it) })
-    }
+        tasks.withType<Jar>().configureEach {
+            duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+            from(configurations["includeInJar"].map { zipTree(it) }) {
+                // Exclude module descriptors and signature files from shaded jars only
+                exclude("module-info.class")
+                exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
+            }
+        }
     }
 
     if (hasSources) {
@@ -99,19 +103,19 @@ allprojects {
             into("${System.getProperty("user.home")}\\.BotWithUs\\scripts")
         }
 
-    tasks.named<Jar>("jar") {
-        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-        finalizedBy(copyJar)
+        tasks.named<Jar>("jar") {
+            duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+            finalizedBy(copyJar)
+        }
     }
 
-    // Prevent creating/copying a root jar with an invalid automatic module name derived from 'UberBWUv2.0'
+    // Always prevent creating/copying a root jar (root name contains a dot) regardless of sources
     if (project == rootProject) {
-        tasks.withType<Jar>().configureEach {
-            enabled = false
-        }
-        tasks.matching { it.name == "copyJar" }.configureEach {
-            enabled = false
+        tasks.withType<Jar>().configureEach { enabled = false }
+        tasks.matching { it.name == "copyJar" }.configureEach { enabled = false }
+        // Also catch tasks created later
+        tasks.whenTaskAdded {
+            if (name == "jar" || name == "copyJar") enabled = false
         }
     }
-}
 }
