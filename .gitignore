@@ -38,7 +38,7 @@ build/
 
 # Local clones of external repos (not tracked)
 /external/
- 
+
 # Local environment files (never commit secrets)
 .env
 .env.*
@@ -46,3 +46,6 @@ build/
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Local skeleton clone for reference (ignored)
+/_skeleton/
