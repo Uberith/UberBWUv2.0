@@ -87,10 +87,10 @@ allprojects {
     }
 
     if (hasSources) {
-        tasks.withType<Jar>().configureEach {
-            duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-            from(configurations["includeInJar"].map { zipTree(it) })
-        }
+    tasks.withType<Jar>().configureEach {
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+        from(configurations["includeInJar"].map { zipTree(it) })
+    }
     }
 
     if (hasSources) {
@@ -99,9 +99,19 @@ allprojects {
             into("${System.getProperty("user.home")}\\.BotWithUs\\scripts")
         }
 
-        tasks.named<Jar>("jar") {
-            duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-            finalizedBy(copyJar)
+    tasks.named<Jar>("jar") {
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+        finalizedBy(copyJar)
+    }
+
+    // Prevent creating/copying a root jar with an invalid automatic module name derived from 'UberBWUv2.0'
+    if (project == rootProject) {
+        tasks.withType<Jar>().configureEach {
+            enabled = false
+        }
+        tasks.matching { it.name == "copyJar" }.configureEach {
+            enabled = false
         }
     }
+}
 }

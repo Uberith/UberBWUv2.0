@@ -7,7 +7,7 @@ module UberChop.main {
     requires org.slf4j;
     requires static xapi;
     requires com.google.gson;
-    requires java.desktop;
+    requires static java.desktop;
 
     opens com.uberith.uberchop to BotWithUs.api; // needed for event annotations
 

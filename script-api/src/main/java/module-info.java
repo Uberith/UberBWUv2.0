@@ -3,7 +3,7 @@ module UberScriptAPI.main {
     requires BotWithUs.api;
     requires static xapi;
     requires com.google.gson;
-    requires java.desktop;
+    requires static java.desktop;
 
     exports com.uberith.api;
     exports com.uberith.api.utils;
