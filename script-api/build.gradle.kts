@@ -14,9 +14,9 @@ dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
 }
 
-// Do not produce or copy a jar for this module
+// Do not copy a jar for this module (but allow building a jar for project dependencies)
 tasks.named<Jar>("jar").configure {
-    enabled = false
+    enabled = true
 }
 tasks.matching { it.name == "copyJar" }.configureEach {
     enabled = false
@@ -29,6 +29,7 @@ val mainSourceSet = sourceSets.getByName("main")
 val publishClasses = tasks.register<Sync>("publishClasses") {
     from(mainSourceSet.output)
     into(layout.buildDirectory.dir("published-classes"))
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
 val classesElements by configurations.creating {

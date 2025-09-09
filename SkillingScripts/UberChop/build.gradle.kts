@@ -1,38 +1,6 @@
-import org.gradle.api.attributes.LibraryElements
-import org.gradle.api.attributes.Usage
-
-// Configuration to consume script-api classes (directory) for embedding
-val embedScriptApi by configurations.creating {
-    isCanBeResolved = true
-    isCanBeConsumed = false
-    attributes.attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage.JAVA_API))
-    attributes.attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(LibraryElements.CLASSES))
-}
+group = "com.uberith.skillingscripts.uberchop"
+version = "1.0.0-SNAPSHOT"
 
 dependencies {
-    // Kotlin stdlib for language operators and primitives
-    implementation(kotlin("stdlib"))
-
-    // Compile against shared code classes (directory), but don't add to runtime
-    compileOnly(project(path = ":script-api", configuration = "classesElements"))
-
-    // Add shared code classes into our jar to satisfy runtime without a separate jar
-    embedScriptApi(project(path = ":script-api", configuration = "classesElements"))
-
-    // SLF4J API prints to script console and logs to file within BotWithUs context
-    implementation("org.slf4j:slf4j-api:2.0.17")
-    implementation("com.google.code.gson:gson:2.10.1")
-    compileOnly("net.botwithus.api:api:1.2.2-20250823.233014-1")
-    compileOnly("net.botwithus.imgui:imgui:1.0.2-20250818.161536-3")
-    compileOnly("net.botwithus.xapi.public:api:1.1.9")
+    implementation(project(":script-api"))
 }
-
-// Disable tests to avoid variant resolution on testRuntimeClasspath
-tasks.withType<Test>().configureEach { enabled = false }
-
-// Build jar and include script-api classes; allow root copy task to run
-tasks.named<Jar>("jar").configure {
-    enabled = true
-    from(embedScriptApi)
-}
-tasks.matching { it.name == "copyJar" }.configureEach { enabled = true }
