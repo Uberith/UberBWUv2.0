@@ -8,6 +8,7 @@ import net.botwithus.rs3.inventories.InventoryManager
 import net.botwithus.rs3.world.World
 import net.botwithus.scripts.Info
 import net.botwithus.ui.workspace.Workspace
+import net.botwithus.xapi.game.inventory.Backpack
 import org.slf4j.LoggerFactory
 import java.util.Locale
 
@@ -35,6 +36,7 @@ class UberChop : SuspendableScript() {
     private val retargetCooldownMs: Long = 1500L
     private val maxInteractFailsBeforeRetarget = 2
 
+    // Internal lifecycle state; keep non-public to avoid leaking nested type
     enum class Phase { READY, PREPARING, CHOPPING, BANKING }
     @Volatile var phase: Phase = Phase.READY
 
@@ -49,6 +51,7 @@ class UberChop : SuspendableScript() {
         tryBindLoggerConsole(workspace)
         gui.render(workspace)
     }
+
 
     private var loggerBound: Boolean = false
     private fun tryBindLoggerConsole(workspace: Workspace) {
@@ -685,8 +688,27 @@ class UberChop : SuspendableScript() {
                 if (n == "magic") base += "eternal magic wood box"
             }
         } catch (_: Throwable) {}
+        // Ensure comprehensive coverage regardless of TreeTypes list
         base += listOf(
-            "arctic wood box", "crystal wood box", "bamboo wood box", "eucalyptus wood box",
+            // Common boxes
+            "oak wood box",
+            "willow wood box",
+            "maple wood box",
+            "yew wood box",
+            "magic wood box",
+            "elder wood box",
+            // Tropical/others
+            "teak wood box",
+            "mahogany wood box",
+            // Synonyms and special cases
+            "acacia wood box",
+            "acadia wood box",
+            "arctic pine wood box",
+            "arctic wood box",
+            // Additional species sometimes referenced
+            "crystal wood box",
+            "bamboo wood box",
+            "eucalyptus wood box",
             "ivy wood box"
         )
         return base.toList()
@@ -702,6 +724,75 @@ class UberChop : SuspendableScript() {
             "Fill with logs",
             "Fill logs"
         )
+        // Preferred: XAPI direct inventory scan via Backpack.getInventory()
+        try {
+            val cls = Class.forName("net.botwithus.xapi.game.inventory.Backpack")
+            val getInventory = try { cls.getMethod("getInventory") } catch (_: Throwable) { null }
+            if (getInventory != null) {
+                val inv = getInventory.invoke(null)
+                val items: List<Any?> = when (inv) {
+                    is Collection<*> -> inv.toList()
+                    is Array<*> -> inv.toList()
+                    else -> try {
+                        val mi = inv!!::class.java.methods.firstOrNull { it.parameterCount == 0 && it.name.lowercase().contains("item") }
+                        val res = mi?.invoke(inv)
+                        when (res) {
+                            is Collection<*> -> res.toList()
+                            is Array<*> -> res.toList()
+                            else -> emptyList()
+                        }
+                    } catch (_: Throwable) { emptyList() }
+                }
+                for (it in items) {
+                    if (it == null) continue
+                    val iname = try { it::class.java.getMethod("getName").invoke(it) as? String } catch (_: Throwable) { null }
+                        ?: try { it::class.java.getField("name").get(it) as? String } catch (_: Throwable) { null }
+                        ?: continue
+                    val nameLower = iname.lowercase(java.util.Locale.ROOT)
+                    if (!nameLower.contains("wood box")) continue
+                    val opts: List<String> = try {
+                        val mo = it::class.java.methods.firstOrNull { m -> m.name.lowercase().contains("option") && m.parameterCount == 0 }
+                        val o = mo?.invoke(it)
+                        when (o) {
+                            is Array<*> -> o.filterIsInstance<String>()
+                            is Collection<*> -> o.filterIsInstance<String>()
+                            else -> emptyList()
+                        }
+                    } catch (_: Throwable) { emptyList() }
+                    val fillOpt = (opts + actions).firstOrNull { op -> op.isNotBlank() && op.lowercase(java.util.Locale.ROOT).contains("fill") }
+                    if (fillOpt != null) {
+                        // Try various Backpack.interact signatures
+                        try {
+                            // interact(item, action)
+                            val m = try { cls.getMethod("interact", it::class.java, String::class.java) } catch (_: Throwable) { null }
+                            if (m != null) {
+                                val ok = m.invoke(null, it, fillOpt)
+                                if (ok is Boolean && ok) { inf("Wood Box: Filled via XAPI getInventory on '$iname' using action '$fillOpt'"); return true }
+                            }
+                        } catch (_: Throwable) { }
+                        try {
+                            // interact(name, action)
+                            val m = try { cls.getMethod("interact", String::class.java, String::class.java) } catch (_: Throwable) { null }
+                            if (m != null) {
+                                val ok = m.invoke(null, iname, fillOpt)
+                                if (ok is Boolean && ok) { inf("Wood Box: Filled via XAPI getInventory(name) on '$iname' using action '$fillOpt'"); return true }
+                            }
+                        } catch (_: Throwable) { }
+                        try {
+                            // interact(index, action) — derive index/slot if available
+                            val slot = try { it::class.java.methods.firstOrNull { m -> m.name.lowercase().contains("slot") && m.parameterCount == 0 }?.invoke(it) as? Int } catch (_: Throwable) { null }
+                            if (slot != null) {
+                                val m = try { cls.getMethod("interact", Int::class.javaPrimitiveType, String::class.java) } catch (_: Throwable) { null }
+                                if (m != null) {
+                                    val ok = m.invoke(null, slot, fillOpt)
+                                    if (ok is Boolean && ok) { inf("Wood Box: Filled via XAPI getInventory(slot) on '$iname' using action '$fillOpt'"); return true }
+                                }
+                            }
+                        } catch (_: Throwable) { }
+                    }
+                }
+            }
+        } catch (_: Throwable) { }
         // API: scan items and attempt best-match actions
         try {
             val cls = Class.forName("net.botwithus.api.game.hud.inventories.Backpack")
@@ -1015,4 +1106,3 @@ class UberChop : SuspendableScript() {
         )
     )
 }
-
