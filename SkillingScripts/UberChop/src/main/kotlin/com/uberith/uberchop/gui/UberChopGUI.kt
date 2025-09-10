@@ -7,14 +7,17 @@ import net.botwithus.xapi.script.ui.interfaces.BuildableUI
 import org.slf4j.LoggerFactory
 import java.io.ByteArrayOutputStream
 import javax.imageio.ImageIO
+import com.uberith.api.ui.ColorManager
+import com.uberith.api.ui.CustomImages
 
 class UberChopGUI(private val script: UberChop) : BuildableUI {
-    // 0 Overview, 1 Core, 2 Handlers, 3 WorldHop, 4 Advanced, 5 Statistics, 6 Support
+    // 0 Overview, 1 Core, 2 Handlers, 3 WorldHop, 4 Advanced, 5 Statistics, 6 Support, 7 Debug
     private var selectedTab: Int = 0
     private val FIXED_W = 560f
     private val FIXED_H = 620f
     private val CONTENT_H = 455f
     // Target tree selection will use a true Combo box (dropdown)
+    private var minimized: Boolean = false
 
     // Textures (loaded once, freed on demand)
     private var logoImg: Any? = null
@@ -48,21 +51,40 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
     }
 
     private fun renderInternal() {
-        // Fixed-size, small-screen friendly window
-        ImGui.setNextWindowSize(FIXED_W, FIXED_H)
+        // Fixed-size, small-screen friendly window (supports compact mode)
+        if (minimized) {
+            ImGui.setNextWindowSize(360f, 140f)
+        } else {
+            ImGui.setNextWindowSize(FIXED_W, FIXED_H)
+        }
 
         if (ImGui.begin("UberChop", 0)) {
             val cm = ColorManager()
             cm.pushColors()
-            // Top logo + summary
+            // Top logo + summary with minimize/expand toggle
             drawLogoBar()
             ImGui.text("Runtime ${script.formattedRuntime()}  |  Logs ${script.logsChopped} (${script.logsPerHour()}/h)  |  Status ${script.status}")
+            ImGui.sameLine(0f, 8f)
+            if (minimized) {
+                if (ImGui.button("Expand", 72f, 0f)) minimized = false
+            } else {
+                if (ImGui.button("Minimize", 86f, 0f)) minimized = true
+            }
             ImGui.separator()
+            if (minimized) {
+                val worldText = tryGetWorldIdText()
+                val pingText = tryGetPingMsText()
+                val coordText = tryGetPlayerCoordsText()
+                ImGui.text("W: $worldText  |  Ping: $pingText ms  |  XYZ: $coordText")
+                cm.popColors()
+                ImGui.end()
+                return
+            }
 
             // Left navigation (vertical buttons with icons + selection marker), Right content (scrollable)
             val navW = 120f
             if (ImGui.beginChild("LeftNav", navW, CONTENT_H, true, 0)) {
-                val navCount = 7
+                val navCount = 8
                 val fudge = 12f // extra safety to avoid scrollbar
                 val available = CONTENT_H - fudge
                 // No vertical spacing between buttons; compute height to fill column
@@ -77,6 +99,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                 drawNavItem(4, "Advanced", navW, cm, btnH, rightPad)
                 drawNavItem(5, "Statistics", navW, cm, btnH, rightPad)
                 drawNavItem(6, "Support", navW, cm, btnH, rightPad)
+                drawNavItem(7, "Debug", navW, cm, btnH, rightPad)
             }
             ImGui.endChild()
 
@@ -98,6 +121,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                         4 -> drawAdvanced()
                         5 -> drawStatistics()
                         6 -> drawSupport()
+                        7 -> drawDebug()
                     }
                 }
                 ImGui.endChild()
@@ -110,7 +134,8 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             ImGui.separator()
             val worldText = tryGetWorldIdText()
             val pingText = tryGetPingMsText()
-            ImGui.text("W: $worldText  |  Ping: $pingText ms")
+            val coordText = tryGetPlayerCoordsText()
+            ImGui.text("W: $worldText  |  Ping: $pingText ms  |  XYZ: $coordText")
             cm.popColors()
         }
         ImGui.end()
@@ -666,12 +691,45 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         val allTrees = com.uberith.uberchop.TreeTypes.ALL
         val currentIdx = script.settings.savedTreeType.coerceIn(0, allTrees.size - 1)
         val currentName = allTrees[currentIdx]
+        var treeChanged = false
         if (ImGui.beginCombo("##targetTreeCombo", currentName, 0)) {
             for (i in allTrees.indices) {
                 val isSelected = (i == currentIdx)
                 if (ImGui.selectable(allTrees[i], isSelected, 0, 0f, 0f)) {
                     script.settings.savedTreeType = i
                     script.targetTree = allTrees[i]
+                    treeChanged = true
+                }
+            }
+            ImGui.endCombo()
+        }
+
+        // Dynamic Location combo (options change with selected tree)
+        val curTreeLower = script.targetTree.lowercase()
+        val filtered = script.treeLocations.filter { loc ->
+            loc.availableTrees.any { at ->
+                val a = at.lowercase()
+                a.contains(curTreeLower) || curTreeLower.contains(a)
+            }
+        }
+        // If tree changed and current location is no longer valid, reset to first valid
+        if (treeChanged && filtered.none { it.name == script.location }) {
+            val fallback = filtered.firstOrNull()?.name ?: script.treeLocations.firstOrNull()?.name ?: ""
+            script.location = fallback
+            script.settings.savedLocation = fallback
+        }
+        val locationNames = filtered.map { it.name }
+        val curLocName = script.location
+        val curLocIdx = locationNames.indexOf(curLocName).coerceAtLeast(0)
+        ImGui.text("Location:")
+        ImGui.sameLine(0f, 6f)
+        val shownLoc = if (locationNames.isNotEmpty()) locationNames.getOrElse(curLocIdx) { locationNames.first() } else "—"
+        if (ImGui.beginCombo("##locationCombo", shownLoc, 0)) {
+            for (i in locationNames.indices) {
+                val isSelected = (i == curLocIdx)
+                if (ImGui.selectable(locationNames[i], isSelected, 0, 0f, 0f)) {
+                    script.location = locationNames[i]
+                    script.settings.savedLocation = script.location
                 }
             }
             ImGui.endCombo()
@@ -766,6 +824,129 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         script.settings.savedTreeType = adjustInt("Saved Tree Type", script.settings.savedTreeType, 0, 50, 1)
         ImGui.text("Saved Location: ${script.settings.savedLocation}")
         ImGui.separator()
+        ImGui.text("Custom Locations")
+        val curLoc = script.location
+        ImGui.text("Selected: $curLoc")
+        // Show effective chop/bank tiles
+        val effChop = try {
+            val sel = script.treeLocations.firstOrNull { it.name == curLoc }
+            val c = script.run { 
+                // reflection-free call into effectiveChopFor via public path is not available; recompute
+                val o = script.settings.customLocations[curLoc]
+                if (o?.chopX != null && o.chopY != null && o.chopZ != null) net.botwithus.rs3.world.Coordinate(o.chopX!!, o.chopY!!, o.chopZ!!) else sel?.chop
+            }
+            if (c != null) "${'$'}{c.x}, ${'$'}{c.y}, ${'$'}{c.plane}" else "—"
+        } catch (_: Throwable) { "—" }
+        val effBank = try {
+            val sel = script.treeLocations.firstOrNull { it.name == curLoc }
+            val o = script.settings.customLocations[curLoc]
+            val b = if (o?.bankX != null && o.bankY != null && o.bankZ != null) net.botwithus.rs3.world.Coordinate(o.bankX!!, o.bankY!!, o.bankZ!!) else sel?.bank
+            if (b != null) "${'$'}{b.x}, ${'$'}{b.y}, ${'$'}{b.plane}" else "—"
+        } catch (_: Throwable) { "—" }
+        ImGui.text("Chop: $effChop  |  Bank: $effBank")
+        if (ImGui.button("Set Chop Tile", 120f, 0f)) {
+            try {
+                val cls = Class.forName("net.botwithus.rs3.entities.LocalPlayer")
+                val me = cls.getMethod("self").invoke(null)
+                val coord = me?.javaClass?.methods?.firstOrNull { it.parameterCount == 0 && it.name.lowercase().contains("coordinate") }?.invoke(me)
+                val x = coord?.javaClass?.methods?.firstOrNull { it.parameterCount == 0 && it.name.lowercase() in setOf("x","getx") }?.invoke(coord) as? Number
+                val y = coord?.javaClass?.methods?.firstOrNull { it.parameterCount == 0 && it.name.lowercase() in setOf("y","gety") }?.invoke(coord) as? Number
+                val z = coord?.javaClass?.methods?.firstOrNull { it.parameterCount == 0 && it.name.lowercase().contains("plane") || it.name.lowercase() == "z" || it.name.lowercase() == "getz" }?.invoke(coord) as? Number
+                if (x != null && y != null && z != null) {
+                    val map = script.settings.customLocations
+                    val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
+                    cur.chopX = x.toInt(); cur.chopY = y.toInt(); cur.chopZ = z.toInt()
+                    map[curLoc] = cur
+                }
+            } catch (_: Throwable) {}
+        }
+        ImGui.sameLine(0f, 6f)
+        if (ImGui.button("Clear Chop", 90f, 0f)) {
+            val map = script.settings.customLocations
+            val cur = map[curLoc]
+            if (cur != null) { cur.chopX = null; cur.chopY = null; cur.chopZ = null; if (cur.bankX==null && cur.bankY==null && cur.bankZ==null) map.remove(curLoc) else map[curLoc]=cur }
+        }
+        if (ImGui.button("Set Bank Tile", 120f, 0f)) {
+            try {
+                val cls = Class.forName("net.botwithus.rs3.entities.LocalPlayer")
+                val me = cls.getMethod("self").invoke(null)
+                val coord = me?.javaClass?.methods?.firstOrNull { it.parameterCount == 0 && it.name.lowercase().contains("coordinate") }?.invoke(me)
+                val x = coord?.javaClass?.methods?.firstOrNull { it.parameterCount == 0 && it.name.lowercase() in setOf("x","getx") }?.invoke(coord) as? Number
+                val y = coord?.javaClass?.methods?.firstOrNull { it.parameterCount == 0 && it.name.lowercase() in setOf("y","gety") }?.invoke(coord) as? Number
+                val z = coord?.javaClass?.methods?.firstOrNull { it.parameterCount == 0 && it.name.lowercase().contains("plane") || it.name.lowercase() == "z" || it.name.lowercase() == "getz" }?.invoke(coord) as? Number
+                if (x != null && y != null && z != null) {
+                    val map = script.settings.customLocations
+                    val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
+                    cur.bankX = x.toInt(); cur.bankY = y.toInt(); cur.bankZ = z.toInt()
+                    map[curLoc] = cur
+                }
+            } catch (_: Throwable) {}
+        }
+        ImGui.sameLine(0f, 6f)
+        if (ImGui.button("Clear Bank", 90f, 0f)) {
+            val map = script.settings.customLocations
+            val cur = map[curLoc]
+            if (cur != null) { cur.bankX = null; cur.bankY = null; cur.bankZ = null; if (cur.chopX==null && cur.chopY==null && cur.chopZ==null) map.remove(curLoc) else map[curLoc]=cur }
+        }
+        ImGui.separator()
+        ImGui.text("Deposit Filters")
+        ImGui.text("Include: ${'$'}{script.settings.depositInclude.size}  |  Keep: ${'$'}{script.settings.depositKeep.size}")
+        if (ImGui.button("Add Blossom", 110f, 0f)) { if (!script.settings.depositInclude.contains("Crystal tree blossom")) script.settings.depositInclude.add("Crystal tree blossom") }
+        ImGui.sameLine(0f, 6f)
+        if (ImGui.button("Add Bamboo", 110f, 0f)) { if (!script.settings.depositInclude.contains("Bamboo")) script.settings.depositInclude.add("Bamboo") }
+        ImGui.sameLine(0f, 6f)
+        if (ImGui.button("Keep Nests", 110f, 0f)) { if (!script.settings.depositKeep.contains("Bird's nest")) script.settings.depositKeep.add("Bird's nest") }
+        if (ImGui.button("Clear Include", 110f, 0f)) { script.settings.depositInclude.clear() }
+        ImGui.sameLine(0f, 6f)
+        if (ImGui.button("Clear Keep", 110f, 0f)) { script.settings.depositKeep.clear() }
+        ImGui.sameLine(0f, 6f)
+        if (ImGui.button("Add From Clipboard", 160f, 0f)) {
+            try {
+                val cb = java.awt.Toolkit.getDefaultToolkit().systemClipboard
+                val data = cb.getData(java.awt.datatransfer.DataFlavor.stringFlavor) as? String
+                val text = data?.trim()
+                if (!text.isNullOrEmpty()) {
+                    if (!script.settings.depositInclude.contains(text)) script.settings.depositInclude.add(text)
+                }
+            } catch (_: Throwable) { }
+        }
+        // Show Include list with remove buttons
+        if (ImGui.beginChild("IncludeList", 0f, 100f, true, 0)) {
+            ImGui.text("Include List")
+            val iter = script.settings.depositInclude.listIterator()
+            var idx = 0
+            while (iter.hasNext()) {
+                val name = iter.next()
+                ImGui.text(name)
+                ImGui.sameLine(0f, 8f)
+                if (ImGui.button("x##inc_$idx", 20f, 0f)) { iter.remove() }
+                idx++
+            }
+        }
+        ImGui.endChild()
+        // Show Keep list with remove buttons and clipboard add to Keep
+        if (ImGui.beginChild("KeepList", 0f, 100f, true, 0)) {
+            ImGui.text("Keep List")
+            val iterK = script.settings.depositKeep.listIterator()
+            var k = 0
+            while (iterK.hasNext()) {
+                val name = iterK.next()
+                ImGui.text(name)
+                ImGui.sameLine(0f, 8f)
+                if (ImGui.button("x##keep_$k", 20f, 0f)) { iterK.remove() }
+                k++
+            }
+            if (ImGui.button("Add Keep From Clipboard", 200f, 0f)) {
+                try {
+                    val cb = java.awt.Toolkit.getDefaultToolkit().systemClipboard
+                    val data = cb.getData(java.awt.datatransfer.DataFlavor.stringFlavor) as? String
+                    val text = data?.trim()
+                    if (!text.isNullOrEmpty() && !script.settings.depositKeep.contains(text)) script.settings.depositKeep.add(text)
+                } catch (_: Throwable) { }
+            }
+        }
+        ImGui.endChild()
+        ImGui.separator()
         ImGui.text("Auto-Skill")
         var b = ImGui.checkbox("Auto-Progress Tree", script.settings.autoProgressTree)
         script.settings.autoProgressTree = b
@@ -804,70 +985,134 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         ImGui.text("- Breaks/AFK help reduce detection risk.")
     }
 
+    private var debugSelectable = false
+    private fun drawDebug() {
+        ImGui.text("Debug Console")
+        ImGui.sameLine(0f, 8f)
+        debugSelectable = ImGui.checkbox("Selectable", debugSelectable)
+        ImGui.sameLine(0f, 6f)
+        if (ImGui.button("Copy All", 90f, 0f)) {
+            try {
+                val all = readUberChopLogTail(1200).joinToString("\n")
+                val cb = java.awt.Toolkit.getDefaultToolkit().systemClipboard
+                cb.setContents(java.awt.datatransfer.StringSelection(all), null)
+            } catch (_: Throwable) { }
+        }
+        ImGui.sameLine(0f, 6f)
+        if (ImGui.button("Clear File", 90f, 0f)) {
+            try {
+                val home = System.getProperty("user.home")
+                val path = java.nio.file.Paths.get(home, ".BotWithUs", "logs", "UberChop.log")
+                java.nio.file.Files.newBufferedWriter(path, java.nio.charset.StandardCharsets.UTF_8).use { /* truncate */ }
+            } catch (_: Throwable) { }
+        }
+        ImGui.separator()
+        val lines = readUberChopLogTail(400)
+        if (ImGui.beginChild("DebugScroll", 0f, 0f, true, 0)) {
+            if (debugSelectable) {
+                var idx = 0
+                for (ln in lines) {
+                    val clicked = ImGui.selectable("$idx: $ln", false, 0, 0f, 0f)
+                    if (clicked) {
+                        try {
+                            val cb = java.awt.Toolkit.getDefaultToolkit().systemClipboard
+                            cb.setContents(java.awt.datatransfer.StringSelection(ln), null)
+                        } catch (_: Throwable) { }
+                    }
+                    idx++
+                }
+            } else {
+                for (ln in lines) ImGui.text(ln)
+            }
+        }
+        ImGui.endChild()
+    }
+
+    private fun readUberChopLogTail(maxLines: Int): List<String> {
+        return try {
+            val home = System.getProperty("user.home")
+            val path = java.nio.file.Paths.get(home, ".BotWithUs", "logs", "UberChop.log")
+            if (!java.nio.file.Files.exists(path)) return emptyList()
+            val all = java.nio.file.Files.readAllLines(path)
+            if (all.size <= maxLines) all else all.takeLast(maxLines)
+        } catch (_: Throwable) { emptyList() }
+    }
+
     private fun tryGetWorldIdText(): String {
         return try {
-            // Attempt common providers via reflection
-            val candidates = arrayOf(
-                "net.botwithus.rs3.world.World",
-                "net.botwithus.xapi.game.world.World"
-            )
-            for (cn in candidates) {
-                try {
-                    val cls = Class.forName(cn)
-                    // Look for zero-arg static methods with world info
-                    for (m in cls.methods) {
-                        if (m.parameterCount == 0 && java.lang.reflect.Modifier.isStatic(m.modifiers)) {
-                            val name = m.name.lowercase()
-                            if (name.contains("world") || name.contains("current")) {
-                                val v = m.invoke(null)
-                                when (v) {
-                                    is Number -> return v.toString()
-                                    is String -> if (v.isNotEmpty()) return v
-                                    else -> {
-                                        // If object, try id()/getId()
-                                        try {
-                                            val idM = v.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.lowercase().contains("id") }
-                                            if (idM != null) return (idM.invoke(v) as? Number)?.toString() ?: v.toString()
-                                        } catch (_: Throwable) { }
-                                        return v.toString()
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (_: Throwable) { }
-            }
+            // Prefer LoginManager.getGameWorlds -> pick the first members-matching world with lowest ping as heuristic
+            try {
+                val lm = Class.forName("net.botwithus.rs3.login.LoginManager")
+                val m = lm.getMethod("getGameWorlds")
+                val worlds = (m.invoke(null) as? java.util.Collection<*>)?.toList() ?: emptyList()
+                var best: Any? = null
+                var bestPing = Int.MAX_VALUE
+                for (w in worlds) {
+                    try {
+                        val ping = (w!!.javaClass.getMethod("getPing").invoke(w) as? Number)?.toInt() ?: continue
+                        if (ping < bestPing) { bestPing = ping; best = w }
+                    } catch (_: Throwable) { }
+                }
+                if (best != null) {
+                    val id = best.javaClass.getMethod("getWorldId").invoke(best) as? Number
+                    if (id != null) return id.toString()
+                }
+            } catch (_: Throwable) { }
             "N/A"
         } catch (_: Throwable) { "N/A" }
     }
 
     private fun tryGetPingMsText(): String {
         return try {
-            val candidates = arrayOf(
-                "net.botwithus.rs3.world.World",
-                "net.botwithus.xapi.game.world.World",
-                "net.botwithus.client.Network",
-                "net.botwithus.rs3.client.Network"
-            )
-            for (cn in candidates) {
-                try {
-                    val cls = Class.forName(cn)
-                    for (m in cls.methods) {
-                        if (m.parameterCount == 0 && java.lang.reflect.Modifier.isStatic(m.modifiers)) {
-                            val name = m.name.lowercase()
-                            if (name.contains("ping") || name.contains("latency") || name.contains("rtt")) {
-                                val v = m.invoke(null)
-                                return when (v) {
-                                    is Number -> v.toString()
-                                    is String -> v
-                                    else -> v.toString()
-                                }
-                            }
-                        }
-                    }
-                } catch (_: Throwable) { }
-            }
+            // Prefer LoginManager.getGameWorlds and use lowest ping as heuristic
+            try {
+                val lm = Class.forName("net.botwithus.rs3.login.LoginManager")
+                val m = lm.getMethod("getGameWorlds")
+                val worlds = (m.invoke(null) as? java.util.Collection<*>)?.toList() ?: emptyList()
+                var bestPing: Int? = null
+                for (w in worlds) {
+                    try {
+                        val ping = (w!!.javaClass.getMethod("getPing").invoke(w) as? Number)?.toInt() ?: continue
+                        if (bestPing == null || ping < bestPing!!) bestPing = ping
+                    } catch (_: Throwable) { }
+                }
+                if (bestPing != null) return bestPing.toString()
+            } catch (_: Throwable) { }
             "N/A"
         } catch (_: Throwable) { "N/A" }
+    }
+
+    private fun tryGetPlayerCoordsText(): String {
+        return try {
+            // Prefer RS3 LocalPlayer API via reflection to avoid hard linking
+            val cls = Class.forName("net.botwithus.rs3.entities.LocalPlayer")
+            val mSelf = cls.getMethod("self")
+            val player = mSelf.invoke(null) ?: return "—"
+            val mCoord = player.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.lowercase().contains("coordinate") }
+            val coord = mCoord?.invoke(player) ?: return "—"
+            val xM = coord.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.lowercase() in setOf("x", "getx", "getxcoord", "getxcoordinate") }
+            val yM = coord.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.lowercase() in setOf("y", "gety", "getycoord", "getycoordinate") }
+            val zM = coord.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.lowercase() in setOf("z", "getz", "getplane", "getlevel") }
+            val x = (xM?.invoke(coord) as? Number)?.toInt()
+            val y = (yM?.invoke(coord) as? Number)?.toInt()
+            val z = (zM?.invoke(coord) as? Number)?.toInt()
+            if (x != null && y != null && z != null) "$x, $y, $z" else "—"
+        } catch (_: Throwable) {
+            try {
+                // Fallback: XAPI style LocalPlayer
+                val cls = Class.forName("net.botwithus.xapi.game.actor.LocalPlayer")
+                val mSelf = cls.getMethod("self")
+                val player = mSelf.invoke(null) ?: return "—"
+                val mCoord = player.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.lowercase().contains("coordinate") }
+                val coord = mCoord?.invoke(player) ?: return "—"
+                val xM = coord.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.lowercase().contains("x") }
+                val yM = coord.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.lowercase().contains("y") }
+                val zM = coord.javaClass.methods.firstOrNull { it.parameterCount == 0 && (it.name.lowercase().contains("z") || it.name.lowercase().contains("plane") || it.name.lowercase().contains("level")) }
+                val x = (xM?.invoke(coord) as? Number)?.toInt()
+                val y = (yM?.invoke(coord) as? Number)?.toInt()
+                val z = (zM?.invoke(coord) as? Number)?.toInt()
+                if (x != null && y != null && z != null) "$x, $y, $z" else "—"
+            } catch (_: Throwable) { "—" }
+        }
     }
 }

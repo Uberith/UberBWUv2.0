@@ -1,4 +1,5 @@
-package com.uberith.uberchop.gui
+package com.uberith.api.ui
+
 import net.botwithus.imgui.ImGui
 
 class CustomImages {
@@ -62,3 +63,4 @@ class CustomImages {
         return false
     }
 }
+

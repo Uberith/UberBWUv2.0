@@ -57,7 +57,14 @@ data class Settings(
 
     var savedTreeType: Int = 0,
     var savedLocation: String = "",
-    var logHandlingMode: Int = 0
+    var logHandlingMode: Int = 0,
+
+    // Custom per-location overrides: location name -> custom tiles
+    var customLocations: MutableMap<String, CustomLocation> = mutableMapOf(),
+
+    // Deposit filters
+    var depositInclude: MutableList<String> = mutableListOf(),
+    var depositKeep: MutableList<String> = mutableListOf()
 
 )
 
@@ -82,3 +89,13 @@ object TreeTypes {
         "Bamboo"
     )
 }
+
+// Serializable container for user overrides of location tiles
+data class CustomLocation(
+    var chopX: Int? = null,
+    var chopY: Int? = null,
+    var chopZ: Int? = null,
+    var bankX: Int? = null,
+    var bankY: Int? = null,
+    var bankZ: Int? = null
+)

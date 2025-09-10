@@ -1,4 +1,4 @@
-package com.uberith.uberchop.gui
+package com.uberith.api.ui
 
 import net.botwithus.imgui.ImGui
 
@@ -103,3 +103,4 @@ class ColorManager {
     fun accentHoverF(): FloatArray = colorToFloats(accentHover)
     fun accentActiveF(): FloatArray = colorToFloats(accentActive)
 }
+

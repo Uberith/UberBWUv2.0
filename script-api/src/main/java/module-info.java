@@ -12,4 +12,5 @@ module UberScriptAPI.main {
     exports com.uberith.api.game.inventories;
     exports com.uberith.api.game.items;
     exports com.uberith.api.game.skills.magic;
+    exports com.uberith.api.ui;
 }
