@@ -63,8 +63,8 @@ allprojects {
             add("includeInJar", "net.botwithus.xapi:xapi:2.0.+")
 
             if (hasKotlin) {
-                // Do not bundle stdlib; platform provides it. Keep it only for compile.
-                compileOnly(kotlin("stdlib"))
+                // Compile against kotlin-stdlib 2.0.0 (platform provides this at runtime)
+                compileOnly("org.jetbrains.kotlin:kotlin-stdlib:2.0.0")
                 // Use the Jvm variant to avoid duplicate module names on the module path
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.7.1")
                 testImplementation(kotlin("test"))
@@ -83,9 +83,9 @@ allprojects {
 
         tasks.withType<KotlinCompile>().configureEach {
             compilerOptions {
-                // Emit Kotlin 1.9 metadata while compiling on JDK 24
-                languageVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_1_9)
-                apiVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_1_9)
+                // Target Kotlin 2.0 metadata/API for runtime compatibility with platform
+                languageVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_0)
+                apiVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_0)
 
                 jvmTarget.set(JvmTarget.JVM_24)
                 freeCompilerArgs.add("-Xjdk-release=24")
@@ -101,6 +101,22 @@ allprojects {
     // Avoid bringing both kotlinx-coroutines-core and -core-jvm onto the module path
     configurations.configureEach {
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
+        // Pin only stdlib artifacts to 2.0.0; leave Build Tools artifacts to the KGP version
+        resolutionStrategy.eachDependency {
+            if (requested.group == "org.jetbrains.kotlin") {
+                if (requested.name == "kotlin-stdlib" ||
+                    requested.name.startsWith("kotlin-stdlib-") ||
+                    requested.name == "kotlin-reflect") {
+                    useVersion("2.0.0")
+                }
+            }
+        }
+        resolutionStrategy.force(
+            "org.jetbrains.kotlin:kotlin-stdlib:2.0.0",
+            "org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.0.0",
+            "org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.0.0",
+            "org.jetbrains.kotlin:kotlin-reflect:2.0.0"
+        )
     }
 
     if (hasSources) {
@@ -110,6 +126,8 @@ allprojects {
                 // Exclude module descriptors and signature files from shaded jars only
                 exclude("module-info.class")
                 exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
+                // Never embed kotlin runtime in scripts
+                exclude("kotlin/**", "META-INF/*.kotlin_module", "META-INF/kotlin*")
             }
         }
     }
