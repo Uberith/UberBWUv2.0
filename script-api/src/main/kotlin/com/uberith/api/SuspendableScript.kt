@@ -60,13 +60,14 @@ abstract class SuspendableScript : Script() {
     }
 
     private fun startCoroutine() {
-        val completion = object : kotlin.coroutines.Continuation<Unit> {
-            override val context: kotlin.coroutines.CoroutineContext = kotlin.coroutines.EmptyCoroutineContext
-            override fun resumeWith(result: Result<Unit>) {
-                result.onFailure { throwable -> println(throwable) }
-            }
-        }
-        val c = coroutineBlock.createCoroutine(completion)
+        val c = coroutineBlock.createCoroutine(LoggingCompletion)
         c.resumeWith(Result.success(Unit))
+    }
+
+    private object LoggingCompletion : kotlin.coroutines.Continuation<Unit> {
+        override val context: kotlin.coroutines.CoroutineContext = kotlin.coroutines.EmptyCoroutineContext
+        override fun resumeWith(result: Result<Unit>) {
+            result.exceptionOrNull()?.let { println(it) }
+        }
     }
 }

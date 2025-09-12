@@ -1,6 +1,7 @@
 package com.uberith.uberchop
 
 import com.uberith.api.SuspendableScript
+import com.uberith.api.game.inventories.Bank
 import net.botwithus.scripts.Info
 import net.botwithus.rs3.entities.LocalPlayer
 import net.botwithus.rs3.entities.SceneObject
@@ -50,7 +51,10 @@ class UberChop : SuspendableScript() {
         when (phase) {
             Phase.READY -> phase = Phase.PREPARING
             Phase.PREPARING -> { phase = Phase.CHOPPING }
-            Phase.BANKING -> { phase = Phase.CHOPPING }
+            Phase.BANKING -> {
+                phase = Phase.CHOPPING
+                Bank.open(this)
+            }
             Phase.CHOPPING -> {
                 val tree = pickNearestTree(targetTree)
                 if (tree != null) {
@@ -58,9 +62,7 @@ class UberChop : SuspendableScript() {
                     val options = tree.getOptions()
                     val idx = options.indexOfFirst { it != null && (it.equals("Chop", true) || it!!.lowercase(Locale.ROOT).contains("chop")) }
                     if (idx >= 0) {
-                        if (tree.interact(idx)) {
-                            logsChopped++
-                        }
+
                     }
                 } else {
                     status = "No $targetTree nearby"
@@ -110,4 +112,3 @@ class UberChop : SuspendableScript() {
         TreeLocation(name = "Default", availableTrees = TreeTypes.ALL)
     )
 }
-
