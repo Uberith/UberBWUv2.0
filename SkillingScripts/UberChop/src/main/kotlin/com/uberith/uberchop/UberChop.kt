@@ -7,6 +7,8 @@ import net.botwithus.rs3.entities.LocalPlayer
 import net.botwithus.rs3.entities.SceneObject
 import net.botwithus.rs3.world.World
 import java.util.Locale
+import net.botwithus.ui.workspace.Workspace
+import com.uberith.uberchop.gui.UberChopGUI
 
 @Info(
     name = "UberChop",
@@ -111,4 +113,18 @@ class UberChop : SuspendableScript() {
     val treeLocations: List<TreeLocation> = listOf(
         TreeLocation(name = "Default", availableTrees = TreeTypes.ALL)
     )
+
+    // GUI instance
+    private val gui by lazy { UberChopGUI(this) }
+
+    override fun onInitialize() {
+        super.onInitialize()
+        // Prepare GUI resources
+        try { gui.preload() } catch (_: Throwable) { }
+    }
+
+    override fun onDraw(workspace: Workspace) {
+        // Render the script configuration UI
+        try { gui.render(workspace) } catch (_: Throwable) { }
+    }
 }
