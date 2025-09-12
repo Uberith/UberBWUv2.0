@@ -4,6 +4,7 @@ module UberScriptAPI.main {
     requires static xapi;
     requires com.google.gson;
     requires static java.desktop;
+    requires org.slf4j;
 
     exports com.uberith.api;
     exports com.uberith.api.utils;
