@@ -2,8 +2,9 @@ package com.uberith.api.game.skills.woodcutting
 
 import com.uberith.api.SuspendableScript
 import com.uberith.api.game.world.SceneObjectQuery
-import com.uberith.api.game.world.internal.SceneObjectRef
+import net.botwithus.rs3.entities.SceneObject
 import java.util.regex.Pattern
+
 
 /**
  * Trees API — convenience helpers for querying and interacting with in‑world trees.
@@ -14,13 +15,9 @@ import java.util.regex.Pattern
  * - Coroutine support: a suspendable [chop] overload integrates neatly with [SuspendableScript].
  *
  * Architectural notes
- * - Query layer: Uses a pluggable provider via [SceneObjects.provider] to locate scene objects by
- *   name and visibility, avoiding any direct dependency on a specific client/XAPI.
- * - Decoupling: The provider returns a lightweight [SceneObjectRef] with only the fields and
- *   methods we need (`id`, `options`, `interact`). Host modules can implement this interface using
- *   their preferred client APIs (with or without reflection).
- * - Safety: This module performs no reflection; any reflective access (if needed) is isolated to
- *   the host's provider implementation.
+ * - Query layer: Uses SceneObjectQuery to locate scene objects by
+ *   name and visibility, avoiding direct dependencies at call sites.
+ * - Decoupling: We interact with net.botwithus.rs3.entities.SceneObject directly.
  *
  * Behavior and assumptions
  * - Name matching: [TreeType.namePattern] is a case‑insensitive regex crafted for exact tree names
@@ -52,9 +49,11 @@ import java.util.regex.Pattern
  * best?.let { Trees.chop(it) }
  * ```
  */
-class TreeObject internal constructor(internal val ref: SceneObjectRef)
+// Wrapper no longer needed; APIs now use SceneObject directly.
 
 object Trees {
+
+    private val logger: org.slf4j.Logger = org.slf4j.LoggerFactory.getLogger(Trees::class.java)
 
     // Common preferred interaction actions for trees
     private val preferredActions = listOf("Chop down", "Cut down")
@@ -63,10 +62,14 @@ object Trees {
         options.firstOrNull { it != null && preferredActions.any { p -> p.equals(it, ignoreCase = true) } }
             ?: preferredActions.first()
 
-    private fun interact(obj: SceneObjectRef): Boolean {
-        val action = chooseAction(obj.options)
+    private fun interact(obj: SceneObject): Boolean {
+        val options = obj.options ?: emptyList()
+        val action = chooseAction(options)
+        logger.info("Interacting: name='{}', typeId={}, action='{}', options={}", obj.name, obj.typeId, action, options)
         val res = obj.interact(action)
-        return res > 0
+        val ok = res > 0
+        if (!ok) logger.warn("Interaction failed: name='{}', typeId={}, action='{}'", obj.name, obj.typeId, action)
+        return ok
     }
 
     /**
@@ -85,15 +88,21 @@ object Trees {
      * - No pathfinding or reachability checks are performed.
      * - Requires the object to be visible (`hidden(false)`).
      */
-    fun nearest(type: TreeType): TreeObject? {
+    fun nearest(type: TreeType): SceneObject? {
+        logger.info("Searching nearest: type='{}'", type.displayName)
         val obj = SceneObjectQuery
             .newQuery()
             .name(type.namePattern)
+            .option("Chop down", "Cut down")
             .hidden(false)
-            .results()
-            .firstOrNull() ?: return null
-        val ref = obj as? SceneObjectRef ?: return null
-        return if (ref.id == null || !type.excludedIds.contains(ref.id!!)) TreeObject(ref) else null
+            .nearest() ?: return null
+        // Exclude specific object type ids if configured
+        if (type.excludedIds.contains(obj.typeId)) {
+            logger.info("Excluding object by typeId: {}", obj.typeId)
+            return null
+        }
+        logger.info("Nearest found: name='{}', typeId={}, options={}", obj.name, obj.typeId, obj.options)
+        return obj
     }
 
     /**
@@ -111,11 +120,20 @@ object Trees {
      * - This method does not wait for an animation or success state; use the suspendable overload
      *   or handle waiting externally.
      */
-    fun chop(type: TreeType): Boolean =
-        nearest(type)?.let { interact(it.ref) } ?: false
+    fun chop(type: TreeType): Boolean {
+        logger.info("Chop by type: '{}'", type.displayName)
+        val obj = nearest(type)
+        return obj?.let { interact(it) } ?: run {
+            logger.info("No '{}' found to chop", type.displayName)
+            false
+        }
+    }
 
     /** Chops a specific tree object previously obtained from [nearest]. */
-    fun chop(target: TreeObject): Boolean = interact(target.ref)
+    fun chop(target: SceneObject): Boolean {
+        logger.info("Chop target: name='{}', typeId={}", target.name, target.typeId)
+        return interact(target)
+    }
 
     /**
      * String-based variant of [chop]. Accepts a human-friendly tree [name]
@@ -132,13 +150,14 @@ object Trees {
         if (type != null) return chop(type)
 
         val pattern = Pattern.compile("^" + Pattern.quote(name.trim()) + "$", Pattern.CASE_INSENSITIVE)
+        logger.info("Chop by exact name: '{}'", name)
         val obj = SceneObjectQuery
             .newQuery()
             .name(pattern)
             .hidden(false)
             .results()
-            .firstOrNull() as? SceneObjectRef ?: return false
-
+            .firstOrNull() ?: return false
+        logger.info("Exact name found: name='{}', typeId={}", obj.name, obj.typeId)
         return interact(obj)
     }
 
@@ -149,8 +168,11 @@ object Trees {
      * - Intended for lightweight presence checks and UI gating; does not favor proximity and
      *   does not imply reachability.
      */
-    fun count(type: TreeType): Int =
-        SceneObjectQuery.newQuery().name(type.namePattern).hidden(false).results().size
+    fun count(type: TreeType): Int {
+        val size = SceneObjectQuery.newQuery().name(type.namePattern).hidden(false).results().size
+        logger.info("Count for '{}': {}", type.displayName, size)
+        return size
+    }
 
     /**
      * Suspendable variant of [chop]: attempts interaction and yields for ~2 game ticks on success.
@@ -167,8 +189,8 @@ object Trees {
         return ok
     }
 
-    /** Suspendable variant that accepts the [TreeObject] from [nearest]. */
-    suspend fun chop(script: SuspendableScript, target: TreeObject): Boolean {
+    /** Suspendable variant that accepts the SceneObject from [nearest]. */
+    suspend fun chop(script: SuspendableScript, target: SceneObject): Boolean {
         val ok = chop(target)
         if (ok) script.awaitTicks(2)
         return ok
@@ -223,27 +245,33 @@ object Trees {
      * - If no [TreeType] matches, falls back to an exact (case-insensitive) name query using
      *   [SceneObjectQuery] without excluded-id filtering.
      */
-    fun nearest(name: String): TreeObject? {
+    fun nearest(name: String): SceneObject? {
         val norm = toTitleCase(name.trim())
+        logger.info("Searching nearest by name: '{}' (normalized='{}')", name, norm)
         val type = TreeType.values().firstOrNull { t ->
             val disp = t.displayName
             val short = disp.removeSuffix(" tree").removeSuffix(" Tree")
             norm.equals(disp, ignoreCase = true) || norm.equals(short, ignoreCase = true)
         }
-        if (type != null) return nearest(type)
+        if (type != null) {
+            logger.info("Resolved name to type: '{}'", type.displayName)
+            return nearest(type)
+        }
 
         // Fallback: relaxed matching — contains(name, ignoreCase) and has a chop option
         val contains: (String, CharSequence) -> Boolean = { needle, hay ->
             hay.toString().contains(needle, ignoreCase = true)
         }
+        logger.info("Fallback search: contains(name) and has chop option")
         val obj = SceneObjectQuery
             .newQuery()
             .name(contains, name.trim())
             .option(contains, "chop")
             .hidden(false)
             .results()
-            .firstOrNull() as? SceneObjectRef ?: return null
-        return TreeObject(obj)
+            .firstOrNull() ?: return null
+        logger.info("Fallback found: name='{}', typeId={}", obj.name, obj.typeId)
+        return obj
     }
 
     /**

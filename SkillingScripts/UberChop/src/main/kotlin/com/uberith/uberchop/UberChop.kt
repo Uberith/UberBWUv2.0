@@ -1,15 +1,14 @@
 package com.uberith.uberchop
 
 import com.uberith.api.SuspendableScript
+import com.uberith.api.game.Animation
 import com.uberith.api.game.inventories.Bank
 import com.uberith.api.game.skills.woodcutting.Trees
-import net.botwithus.scripts.Info
-import net.botwithus.rs3.entities.LocalPlayer
-import net.botwithus.rs3.entities.SceneObject
-import net.botwithus.rs3.world.World
-import java.util.Locale
-import net.botwithus.ui.workspace.Workspace
 import com.uberith.uberchop.gui.UberChopGUI
+import net.botwithus.scripts.Info
+import net.botwithus.ui.workspace.Workspace
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 
 @Info(
     name = "UberChop",
@@ -27,7 +26,7 @@ class UberChop : SuspendableScript() {
     var logsChopped: Int = 0
     var status: String = "Idle"
     @Volatile var phase: Phase = Phase.READY
-
+    private val logger: Logger = LoggerFactory.getLogger(this.javaClass)
     private var totalRuntimeMs: Long = 0L
     private var lastRuntimeUpdateMs: Long = 0L
 
@@ -58,10 +57,15 @@ class UberChop : SuspendableScript() {
                 Bank.open(this)
             }
             Phase.CHOPPING -> {
+                if ()
+
+
                 status = "Locating nearest $targetTree"
+                logger.info("Locating nearest $targetTree")
                 val tree = Trees.nearest(targetTree)
                 if (tree != null) {
-                    status = "Chopping $tree"
+                    status = "Chopping ${tree.name}"
+                    logger.info("Chopping ${tree.name}")
                     Trees.chop(tree)
                 } else {
                     status = "No $targetTree nearby"
