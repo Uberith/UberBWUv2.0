@@ -6,7 +6,7 @@ import time
 import urllib.parse
 import urllib.request
 import urllib.error
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 
 BASE = "https://runescape.wiki/w/api.php"
 UA = "UberBWUv2.0-fetch/1.0 (RS3 wiki archival; contact: local dev)"
@@ -73,6 +73,67 @@ def http_get(params: Dict[str, Any]) -> Dict[str, Any]:
     if last_err:
         raise last_err
     raise RuntimeError("http_get: failed without captured exception")
+
+
+def bucket_query(lua_query: str) -> Dict[str, Any]:
+    """Call action=bucket with a Lua-style query string.
+
+    Example:
+        bucket_query("bucket('object_id').select('page_name_sub','id').limit(5).run()")
+    """
+    return http_get({
+        "action": "bucket",
+        "format": "json",
+        "query": lua_query,
+    })
+
+
+def fetch_rs3_object_ids(batch_size: int = 5000, pause: float = 0.1) -> List[Tuple[str, str]]:
+    """Fetch all RS3 object names and IDs via the Bucket API.
+
+    Returns a list of tuples (page_name_sub, ids_csv).
+    Writes a CSV to datasets/rs3/wiki/object_ids.csv.
+    """
+    rows: List[Tuple[str, str]] = []
+    offset = 0
+    while True:
+        lua = (
+            "bucket('object_id')"
+            ".select('page_name_sub','id')"
+            f".offset({offset}).limit({batch_size}).run()"
+        )
+        data = bucket_query(lua)
+        batch = data.get("bucket", [])
+        if not batch:
+            break
+        for item in batch:
+            name = str(item.get("page_name_sub", ""))
+            ids = item.get("id", [])
+            if isinstance(ids, list):
+                ids_csv = ", ".join(str(x) for x in ids)
+            else:
+                ids_csv = str(ids) if ids is not None else ""
+            rows.append((name, ids_csv))
+        offset += batch_size
+        if pause > 0:
+            time.sleep(pause)
+
+    # Persist to CSV alongside existing outputs
+    ensure_dir(OUT_DIR)
+    csv_path = os.path.join(OUT_DIR, "object_ids.csv")
+    try:
+        import csv  # local import to keep top lean
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["name", "ids"])  # header
+            w.writerows(rows)
+    except Exception:
+        # Fallback: also store JSON if CSV write fails for any reason
+        write_json(os.path.join(OUT_DIR, "object_ids.json"), [
+            {"name": n, "ids": ids} for (n, ids) in rows
+        ])
+
+    return rows
 
 
 def list_category_members(category: str, limit: int = 10000) -> List[Dict[str, Any]]:
@@ -184,7 +245,24 @@ def write_json(path: str, obj: Any) -> None:
 
 
 def main() -> int:
-    # Target categories — configurable via RS3_CATEGORIES env (comma-separated)
+    # Optional mode switch: if invoked with argument "bucket-object-ids",
+    # fetch RS3 object IDs via the Bucket API and exit.
+    if len(sys.argv) > 1 and sys.argv[1] == "bucket-object-ids":
+        try:
+            batch = int(os.environ.get("RS3_BUCKET_BATCH", "5000"))
+        except ValueError:
+            batch = 5000
+        try:
+            pause = float(os.environ.get("RS3_BUCKET_PAUSE", "0.1"))
+        except ValueError:
+            pause = 0.1
+
+        rows = fetch_rs3_object_ids(batch_size=batch, pause=pause)
+        # Minimal stdout summary for CLI feedback
+        print(f"Fetched {len(rows)} RS3 object rows -> datasets/rs3/wiki/object_ids.csv")
+        return 0
+
+    # Target categories - configurable via RS3_CATEGORIES env (comma-separated)
     default_categories = [
         "Category:Banks",
         "Category:Lodestones",

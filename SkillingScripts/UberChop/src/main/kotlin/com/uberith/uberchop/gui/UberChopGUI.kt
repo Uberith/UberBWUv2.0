@@ -19,6 +19,17 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
     // Target tree selection will use a true Combo box (dropdown)
     private var minimized: Boolean = false
 
+    // UI state for manual coordinate entry on Overview (for "Anywhere")
+    private var coordUiLocName: String = ""
+    private var chopXArr = intArrayOf(0)
+    private var chopYArr = intArrayOf(0)
+    private var chopZArr = intArrayOf(0)
+    private var bankXArr = intArrayOf(0)
+    private var bankYArr = intArrayOf(0)
+    private var bankZArr = intArrayOf(0)
+    private var chopXYZText: String = ""
+    private var bankXYZText: String = ""
+
     // Textures (loaded once, freed on demand)
     private var logoImg: Any? = null
     private var logoBytesSize: Int = 0
@@ -733,6 +744,105 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             ImGui.endCombo()
         }
 
+        // Keep UI buffers in sync when the selected location changes
+        val curLoc = script.location
+        if (coordUiLocName != curLoc) {
+            coordUiLocName = curLoc
+            try {
+                val sel = script.treeLocations.firstOrNull { it.name == curLoc }
+                val o = script.settings.customLocations[curLoc]
+                val effChop = if (o?.chopX != null && o.chopY != null && o.chopZ != null) {
+                    net.botwithus.rs3.world.Coordinate(o.chopX!!, o.chopY!!, o.chopZ!!)
+                } else sel?.chop
+                val effBank = if (o?.bankX != null && o.bankY != null && o.bankZ != null) {
+                    net.botwithus.rs3.world.Coordinate(o.bankX!!, o.bankY!!, o.bankZ!!)
+                } else sel?.bank
+                // Initialize text fields based on effective tiles
+                chopXYZText = if (effChop != null) "${effChop.x},${effChop.y},${effChop.z}" else ""
+                bankXYZText = if (effBank != null) "${effBank.x},${effBank.y},${effBank.z}" else ""
+            } catch (_: Throwable) { }
+        }
+
+        // When "Anywhere" is selected, expose Set buttons and manual coordinate entry under the dropdown
+        if (curLoc.equals("Anywhere", ignoreCase = true)) {
+            ImGui.separator()
+            ImGui.text("Custom Coordinates (Anywhere)")
+
+            // Chop: single text box + actions (buttons on next line to avoid overflow)
+            chopXYZText = ImGui.inputText("Chop", chopXYZText, 0)
+            if (ImGui.button("Apply##chop", 70f, 0f)) {
+                parseXYZ(chopXYZText)?.let { (x, y, z) ->
+                    val map = script.settings.customLocations
+                    val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
+                    cur.chopX = x; cur.chopY = y; cur.chopZ = z
+                    map[curLoc] = cur
+                }
+            }
+            ImGui.sameLine(0f, 6f)
+            if (ImGui.button("Use Player##chop", 110f, 0f)) {
+                try {
+                    val cls = Class.forName("net.botwithus.rs3.entities.LocalPlayer")
+                    val me = cls.getMethod("self").invoke(null)
+                    val coord = me?.javaClass?.methods?.firstOrNull { it.parameterCount == 0 && it.name.lowercase().contains("coordinate") }?.invoke(me)
+                    val x = coord?.javaClass?.methods?.firstOrNull { it.parameterCount == 0 && it.name.lowercase() in setOf("x","getx") }?.invoke(coord) as? Number
+                    val y = coord?.javaClass?.methods?.firstOrNull { it.parameterCount == 0 && it.name.lowercase() in setOf("y","gety") }?.invoke(coord) as? Number
+                    val z = coord?.javaClass?.methods?.firstOrNull { it.parameterCount == 0 && (it.name.lowercase().contains("plane") || it.name.lowercase() in setOf("z","getz")) }?.invoke(coord) as? Number
+                    if (x != null && y != null && z != null) {
+                        chopXYZText = "${x.toInt()},${y.toInt()},${z.toInt()}"
+                        val map = script.settings.customLocations
+                        val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
+                        cur.chopX = x.toInt(); cur.chopY = y.toInt(); cur.chopZ = z.toInt()
+                        map[curLoc] = cur
+                    }
+                } catch (_: Throwable) { }
+            }
+            run {
+                val valid = chopXYZText.isBlank() || parseXYZ(chopXYZText) != null
+                if (!valid) {
+                    ImGui.pushStyleColor(ColorManager.ColorType.Text.index, 0.94f, 0.36f, 0.36f, 1f)
+                    ImGui.text("Format: X,Y,Z")
+                    ImGui.popStyleColor(1)
+                }
+            }
+
+            // Bank: single text box + actions (buttons on next line to avoid overflow)
+            bankXYZText = ImGui.inputText("Bank", bankXYZText, 0)
+            if (ImGui.button("Apply##bank", 70f, 0f)) {
+                parseXYZ(bankXYZText)?.let { (x, y, z) ->
+                    val map = script.settings.customLocations
+                    val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
+                    cur.bankX = x; cur.bankY = y; cur.bankZ = z
+                    map[curLoc] = cur
+                }
+            }
+            ImGui.sameLine(0f, 6f)
+            if (ImGui.button("Use Player##bank", 110f, 0f)) {
+                try {
+                    val cls = Class.forName("net.botwithus.rs3.entities.LocalPlayer")
+                    val me = cls.getMethod("self").invoke(null)
+                    val coord = me?.javaClass?.methods?.firstOrNull { it.parameterCount == 0 && it.name.lowercase().contains("coordinate") }?.invoke(me)
+                    val x = coord?.javaClass?.methods?.firstOrNull { it.parameterCount == 0 && it.name.lowercase() in setOf("x","getx") }?.invoke(coord) as? Number
+                    val y = coord?.javaClass?.methods?.firstOrNull { it.parameterCount == 0 && it.name.lowercase() in setOf("y","gety") }?.invoke(coord) as? Number
+                    val z = coord?.javaClass?.methods?.firstOrNull { it.parameterCount == 0 && (it.name.lowercase().contains("plane") || it.name.lowercase() in setOf("z","getz")) }?.invoke(coord) as? Number
+                    if (x != null && y != null && z != null) {
+                        bankXYZText = "${x.toInt()},${y.toInt()},${z.toInt()}"
+                        val map = script.settings.customLocations
+                        val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
+                        cur.bankX = x.toInt(); cur.bankY = y.toInt(); cur.bankZ = z.toInt()
+                        map[curLoc] = cur
+                    }
+                } catch (_: Throwable) { }
+            }
+            run {
+                val valid = bankXYZText.isBlank() || parseXYZ(bankXYZText) != null
+                if (!valid) {
+                    ImGui.pushStyleColor(ColorManager.ColorType.Text.index, 0.94f, 0.36f, 0.36f, 1f)
+                    ImGui.text("Format: X,Y,Z")
+                    ImGui.popStyleColor(1)
+                }
+            }
+        }
+
         ImGui.separator()
         // Requirements (single section on Overview)
         ImGui.text("Requirements")
@@ -864,6 +974,22 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         } catch (_: Throwable) { false }
     }
 
+    // Parse "X,Y,Z" into a triple or null if invalid
+    private fun parseXYZ(text: String): Triple<Int, Int, Int>? {
+        val t = text.trim()
+        if (t.isEmpty()) return null
+        val parts = t.split(',')
+        if (parts.size != 3) return null
+        return try {
+            val x = parts[0].trim().toInt()
+            val y = parts[1].trim().toInt()
+            val z = parts[2].trim().toInt()
+            Triple(x, y, z)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
     private fun drawHandlers() {
         header("Break Handler", ColorManager())
         var b = ImGui.checkbox("Random Breaks", script.settings.performRandomBreak)
@@ -935,13 +1061,13 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                 val o = script.settings.customLocations[curLoc]
                 if (o?.chopX != null && o.chopY != null && o.chopZ != null) net.botwithus.rs3.world.Coordinate(o.chopX!!, o.chopY!!, o.chopZ!!) else sel?.chop
             }
-            if (c != null) "${'$'}{c.x}, ${'$'}{c.y}, ${'$'}{c.plane}" else "—"
+            if (c != null) "${c.x}, ${c.y}, ${c.z}" else "-"
         } catch (_: Throwable) { "—" }
         val effBank = try {
             val sel = script.treeLocations.firstOrNull { it.name == curLoc }
             val o = script.settings.customLocations[curLoc]
             val b = if (o?.bankX != null && o.bankY != null && o.bankZ != null) net.botwithus.rs3.world.Coordinate(o.bankX!!, o.bankY!!, o.bankZ!!) else sel?.bank
-            if (b != null) "${'$'}{b.x}, ${'$'}{b.y}, ${'$'}{b.plane}" else "—"
+            if (b != null) "${b.x}, ${b.y}, ${b.z}" else "-"
         } catch (_: Throwable) { "—" }
         ImGui.text("Chop: $effChop  |  Bank: $effBank")
         if (ImGui.button("Set Chop Tile", 120f, 0f)) {
@@ -990,7 +1116,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         }
         ImGui.separator()
         ImGui.text("Deposit Filters")
-        ImGui.text("Include: ${'$'}{script.settings.depositInclude.size}  |  Keep: ${'$'}{script.settings.depositKeep.size}")
+        ImGui.text("Include: ${script.settings.depositInclude.size}  |  Keep: ${script.settings.depositKeep.size}")
         if (ImGui.button("Add Blossom", 110f, 0f)) { if (!script.settings.depositInclude.contains("Crystal tree blossom")) script.settings.depositInclude.add("Crystal tree blossom") }
         ImGui.sameLine(0f, 6f)
         if (ImGui.button("Add Bamboo", 110f, 0f)) { if (!script.settings.depositInclude.contains("Bamboo")) script.settings.depositInclude.add("Bamboo") }

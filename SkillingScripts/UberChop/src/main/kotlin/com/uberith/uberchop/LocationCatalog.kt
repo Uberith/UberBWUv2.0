@@ -4,6 +4,7 @@ import net.botwithus.rs3.world.Coordinate
 
 object LocationCatalog {
     val ALL: List<TreeLocation> = listOf(
+        // Verified
         TreeLocation(
             name = "Anywhere",
             availableTrees = TreeTypes.ALL,
@@ -58,23 +59,33 @@ object LocationCatalog {
             chop = Coordinate(2602, 3294, 0),
             bank = Coordinate(2615, 3332, 0)
         ),
+        // Verified
         TreeLocation(
             name = "Burthorpe",
-            availableTrees = listOf("Tree", "Oak", "Willow"),
+            availableTrees = listOf("Tree", "Oak"),
             chop = Coordinate(2903, 3501, 0),
             bank = Coordinate(2890, 3534, 0)
         ),
-        TreeLocation(
-            name = "Burthorpe",
-            availableTrees = listOf("Yew"),
-            chop = Coordinate(2919, 3548, 0),
-            bank = Coordinate(2890, 3534, 0)
-        ),
+        // Verified
         TreeLocation(
             name = "Lumbridge",
-            availableTrees = listOf("Tree", "Oak", "Willow"),
-            chop = Coordinate(3202, 3231, 0),
-            bank = Coordinate(3209, 3219, 2)
+            availableTrees = listOf("Tree", "Oak"),
+            chop = Coordinate(3242, 3264, 0),
+            bank = Coordinate(3214, 3258, 0)
+        ),
+        // Verified
+        TreeLocation(
+            name = "Lumbridge Willow",
+            availableTrees = listOf("Willow"),
+            chop = Coordinate(3224, 3243, 0),
+            bank = Coordinate(3214, 3258, 0)
+        ),
+        // Verified
+        TreeLocation(
+            name = "Lumbridge Yew",
+            availableTrees = listOf("Yew"),
+            chop = Coordinate(3243, 3200, 0),
+            bank = Coordinate(3214, 3258, 0)
         ),
         TreeLocation(
             name = "Varrock West",
@@ -88,6 +99,7 @@ object LocationCatalog {
             chop = Coordinate(3291, 3426, 0),
             bank = Coordinate(3253, 3420, 0)
         ),
+        // Verified
         TreeLocation(
             name = "Draynor Willows",
             availableTrees = listOf("Willow"),
