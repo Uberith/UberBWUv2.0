@@ -2,6 +2,7 @@ package com.uberith.uberchop
 
 import com.uberith.api.SuspendableScript
 import com.uberith.api.game.inventories.Bank
+import com.uberith.api.game.skills.woodcutting.Trees
 import net.botwithus.scripts.Info
 import net.botwithus.rs3.entities.LocalPlayer
 import net.botwithus.rs3.entities.SceneObject
@@ -45,7 +46,6 @@ class UberChop : SuspendableScript() {
     }
 
     override suspend fun onLoop() {
-        // runtime accounting
         val now = System.currentTimeMillis()
         if (lastRuntimeUpdateMs != 0L) totalRuntimeMs += (now - lastRuntimeUpdateMs)
         lastRuntimeUpdateMs = now
@@ -58,14 +58,11 @@ class UberChop : SuspendableScript() {
                 Bank.open(this)
             }
             Phase.CHOPPING -> {
-                val tree = pickNearestTree(targetTree)
+                status = "Locating nearest $targetTree"
+                val tree = Trees.nearest(targetTree)
                 if (tree != null) {
-                    status = "Chopping ${tree.name}"
-                    val options = tree.getOptions()
-                    val idx = options.indexOfFirst { it != null && (it.equals("Chop", true) || it!!.lowercase(Locale.ROOT).contains("chop")) }
-                    if (idx >= 0) {
-
-                    }
+                    status = "Chopping $tree"
+                    Trees.chop(tree)
                 } else {
                     status = "No $targetTree nearby"
                 }
@@ -73,18 +70,6 @@ class UberChop : SuspendableScript() {
         }
 
         awaitTicks(1)
-    }
-
-    private fun pickNearestTree(name: String): SceneObject? {
-        val me = LocalPlayer.self() ?: return null
-        val n = name.lowercase(Locale.ROOT)
-        return World.getSceneObjects()
-            .asSequence()
-            .filter { so ->
-                so.name.lowercase(Locale.ROOT).contains(n) &&
-                so.getOptions().any { it != null && it.lowercase(Locale.ROOT).contains("chop") }
-            }
-            .minByOrNull { so -> me.distanceTo(so.coordinate) }
     }
 
     fun formattedRuntime(): String {
