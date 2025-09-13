@@ -1,7 +1,8 @@
 package com.uberith.api.game.skills.woodcutting
 
 import com.uberith.api.SuspendableScript
-import com.uberith.api.game.world.SceneObjectQuery
+import com.uberith.api.nearest
+import com.uberith.api.game.query.SceneObjectQuery
 import net.botwithus.rs3.entities.SceneObject
 import java.util.regex.Pattern
 
@@ -65,43 +66,37 @@ object Trees {
     private fun interact(obj: SceneObject): Boolean {
         val options = obj.options ?: emptyList()
         val action = chooseAction(options)
-        logger.info("Interacting: name='{}', typeId={}, action='{}', options={}", obj.name, obj.typeId, action, options)
+        logger.info("[Trees] interact: name='{}', typeId={}, action='{}', options={}", obj.name, obj.typeId, action, options)
         val res = obj.interact(action)
         val ok = res > 0
-        if (!ok) logger.warn("Interaction failed: name='{}', typeId={}, action='{}'", obj.name, obj.typeId, action)
+        if (!ok) logger.warn("[Trees] interact failed: name='{}', typeId={}, action='{}'", obj.name, obj.typeId, action)
         return ok
     }
 
     /**
      * Finds the nearest visible scene object matching [type].
      *
-     * Matching details
-     * - Uses [TreeType.namePattern] (case‑insensitive) to match by display name.
-     * - Excludes known invalid variants when an `id` field is present and listed in
-     *   [TreeType.excludedIds]. If the `id` field is absent or unreadable, no id‑based filtering
-     *   is applied.
-     *
-     * Returns
-     * - The underlying platform object (opaque `Any`) or `null` if none found.
-     *
-     * Limitations
-     * - No pathfinding or reachability checks are performed.
-     * - Requires the object to be visible (`hidden(false)`).
+     * @param type tree type to locate
+     * @return nearest visible [SceneObject] or null if none
      */
     fun nearest(type: TreeType): SceneObject? {
-        logger.info("Searching nearest: type='{}'", type.displayName)
-        val obj = SceneObjectQuery
+        logger.info("[Trees] nearest(type='{}'): begin", type.displayName)
+        val obj: SceneObject = SceneObjectQuery
             .newQuery()
             .name(type.namePattern)
             .option("Chop down", "Cut down")
             .hidden(false)
-            .nearest() ?: return null
+            .results()
+            .nearest() ?: run {
+                logger.info("[Trees] nearest(type='{}'): none found", type.displayName)
+                return null
+            }
         // Exclude specific object type ids if configured
         if (type.excludedIds.contains(obj.typeId)) {
-            logger.info("Excluding object by typeId: {}", obj.typeId)
+            logger.info("[Trees] nearest(type='{}'): excluded by typeId {}", type.displayName, obj.typeId)
             return null
         }
-        logger.info("Nearest found: name='{}', typeId={}, options={}", obj.name, obj.typeId, obj.options)
+        logger.info("[Trees] nearest(type='{}'): name='{}', typeId={}, options={}", type.displayName, obj.name, obj.typeId, obj.options)
         return obj
     }
 
@@ -120,25 +115,41 @@ object Trees {
      * - This method does not wait for an animation or success state; use the suspendable overload
      *   or handle waiting externally.
      */
+    /**
+     * Chops the nearest tree matching [type] using a preferred action.
+     *
+     * @param type tree type to chop
+     * @return true if the interaction was issued
+     */
     fun chop(type: TreeType): Boolean {
-        logger.info("Chop by type: '{}'", type.displayName)
+        logger.info("[Trees] chop(type='{}'): begin", type.displayName)
         val obj = nearest(type)
-        return obj?.let { interact(it) } ?: run {
-            logger.info("No '{}' found to chop", type.displayName)
+        return obj?.let {
+            logger.info("[Trees] chop(type='{}'): target name='{}', typeId={}", type.displayName, it.name, it.typeId)
+            interact(it)
+        } ?: run {
+            logger.info("[Trees] chop(type='{}'): no target", type.displayName)
             false
         }
     }
 
-    /** Chops a specific tree object previously obtained from [nearest]. */
+    /**
+     * Chops a specific tree object previously obtained from [nearest].
+     *
+     * @param target scene object representing the tree
+     * @return true if the interaction was issued
+     */
     fun chop(target: SceneObject): Boolean {
-        logger.info("Chop target: name='{}', typeId={}", target.name, target.typeId)
+        logger.info("[Trees] chop(target): name='{}', typeId={}", target.name, target.typeId)
         return interact(target)
     }
 
     /**
-     * String-based variant of [chop]. Accepts a human-friendly tree [name]
-     * (e.g., "Oak", "Oak Tree"). Attempts to resolve to a [TreeType] first so
-     * excluded-id filtering applies; otherwise falls back to direct name match.
+     * Chops by human‑friendly tree [name] (e.g., "Oak", "Oak Tree").
+     * Attempts to resolve to a [TreeType] first; otherwise falls back to direct name match.
+     *
+     * @param name tree name
+     * @return true if the interaction was issued
      */
     fun chop(name: String): Boolean {
         val norm = toTitleCase(name.trim())
@@ -169,19 +180,17 @@ object Trees {
      *   does not imply reachability.
      */
     fun count(type: TreeType): Int {
-        val size = SceneObjectQuery.newQuery().name(type.namePattern).hidden(false).results().size
+        val size = SceneObjectQuery.newQuery().name(type.namePattern).hidden(false).results().size()
         logger.info("Count for '{}': {}", type.displayName, size)
         return size
     }
 
     /**
-     * Suspendable variant of [chop]: attempts interaction and yields for ~2 game ticks on success.
+     * Suspends then chops the nearest tree matching [type].
      *
-     * Intended use
-     * - For coroutine‑driven scripts ([SuspendableScript]) to pace interactions without busy waiting.
-     *
-     * Returns
-     * - `true` if the interaction was initiated; `false` otherwise.
+     * @param script coroutine context with await utilities
+     * @param type tree type to chop
+     * @return true if the interaction was issued
      */
     suspend fun chop(script: SuspendableScript, type: TreeType): Boolean {
         val ok = chop(type)
@@ -189,7 +198,13 @@ object Trees {
         return ok
     }
 
-    /** Suspendable variant that accepts the SceneObject from [nearest]. */
+    /**
+     * Suspends then chops a specific [target] previously obtained from [nearest].
+     *
+     * @param script coroutine context with await utilities
+     * @param target scene object representing the tree
+     * @return true if the interaction was issued
+     */
     suspend fun chop(script: SuspendableScript, target: SceneObject): Boolean {
         val ok = chop(target)
         if (ok) script.awaitTicks(2)
@@ -197,7 +212,11 @@ object Trees {
     }
 
     /**
-     * Suspendable string-based variant of [chop]. Yields for ~2 ticks on success.
+     * Suspends then chops by human‑friendly [name].
+     *
+     * @param script coroutine context with await utilities
+     * @param name tree name
+     * @return true if the interaction was issued
      */
     suspend fun chop(script: SuspendableScript, name: String): Boolean {
         val ok = chop(name)
@@ -206,71 +225,70 @@ object Trees {
     }
 
     /**
-     * Builds a case‑insensitive alternation [Pattern] for multiple exact tree names.
+     * Builds a case‑insensitive alternation regex for multiple exact names.
      *
-     * Example
-     * ```kotlin
-     * val p = Trees.patternFor("Oak", "Willow", "Yew")
-     * // Produces a regex that matches any of those names, case‑insensitively
-     * ```
+     * @param names exact names to match
+     * @return compiled [Pattern] matching any provided name
      */
     fun patternFor(vararg names: String): Pattern =
         Pattern.compile(names.joinToString("|") { Pattern.quote(it) }, Pattern.CASE_INSENSITIVE)
 
     /**
-     * Lists all [TreeType] entries available for a Woodcutting [level] and membership flag.
+     * Lists [TreeType] entries available for a Woodcutting [level] and membership flag.
      *
-     * Rules
-     * - Includes types where `level >= levelReq`.
-     * - Excludes member‑only types when [isMember] is `false`.
+     * @param level woodcutting level
+     * @param isMember membership flag
+     * @return list of available tree types
      */
     fun availableFor(level: Int, isMember: Boolean): List<TreeType> =
         TreeType.values().filter { level >= it.levelReq && (!it.membersOnly || isMember) }
 
     /**
-     * Returns the highest‑requirement [TreeType] available for the given [level] and [isMember].
-     * Returns `null` if no types qualify.
+     * Picks the highest‑requirement available [TreeType] for the given context.
+     *
+     * @param level woodcutting level
+     * @param isMember membership flag
+     * @return best available type or null if none
      */
     fun bestFor(level: Int, isMember: Boolean): TreeType? =
         availableFor(level, isMember).maxByOrNull { it.levelReq }
 
     /**
-     * Finds the nearest tree given a human-friendly [name] (e.g., "Maple", "Maple Tree").
+     * Finds the nearest tree by human‑friendly [name] (e.g., "Maple", "Maple Tree").
+     * Resolves to a [TreeType] first, otherwise falls back to direct name matching.
      *
-     * Resolution strategy
-     * - First attempts to resolve [name] to a [TreeType] by comparing against
-     *   [TreeType.displayName] (case-insensitive), and a shortened variant with a trailing
-     *   "tree" removed (e.g., "Maple Tree" -> "Maple"). If a match is found, delegates to
-     *   [nearest] with the resolved [TreeType] which also applies excluded-id filtering.
-     * - If no [TreeType] matches, falls back to an exact (case-insensitive) name query using
-     *   [SceneObjectQuery] without excluded-id filtering.
+     * @param name tree name
+     * @return nearest visible [SceneObject] or null if none
      */
     fun nearest(name: String): SceneObject? {
         val norm = toTitleCase(name.trim())
-        logger.info("Searching nearest by name: '{}' (normalized='{}')", name, norm)
+        logger.info("[Trees] nearest(name): raw='{}', normalized='{}'", name, norm)
         val type = TreeType.values().firstOrNull { t ->
             val disp = t.displayName
             val short = disp.removeSuffix(" tree").removeSuffix(" Tree")
             norm.equals(disp, ignoreCase = true) || norm.equals(short, ignoreCase = true)
         }
         if (type != null) {
-            logger.info("Resolved name to type: '{}'", type.displayName)
+            logger.info("[Trees] nearest(name): resolved to type='{}'", type.displayName)
             return nearest(type)
         }
 
-        // Fallback: relaxed matching — contains(name, ignoreCase) and has a chop option
+        // Fallback: relaxed matching - contains(name, ignoreCase) and has a chop option
         val contains: (String, CharSequence) -> Boolean = { needle, hay ->
             hay.toString().contains(needle, ignoreCase = true)
         }
-        logger.info("Fallback search: contains(name) and has chop option")
+        logger.info("[Trees] nearest(name): fallback contains(name) + has chop option")
         val obj = SceneObjectQuery
             .newQuery()
             .name(contains, name.trim())
             .option(contains, "chop")
             .hidden(false)
             .results()
-            .firstOrNull() ?: return null
-        logger.info("Fallback found: name='{}', typeId={}", obj.name, obj.typeId)
+            .firstOrNull() ?: run {
+                logger.info("[Trees] nearest(name): no fallback match for '{}'", name)
+                return null
+            }
+        logger.info("[Trees] nearest(name): fallback name='{}', typeId={}", obj.name, obj.typeId)
         return obj
     }
 

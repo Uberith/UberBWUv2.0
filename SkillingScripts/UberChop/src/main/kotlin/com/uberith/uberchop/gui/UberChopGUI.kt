@@ -683,9 +683,6 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
     }
 
     private fun drawOverview() {
-        val bank = ImGui.checkbox("Bank When Full", script.bankWhenFull)
-        script.bankWhenFull = bank
-
         ImGui.separator()
         ImGui.text("Target Tree:")
         ImGui.sameLine(0f, 6f)
@@ -737,17 +734,10 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         }
 
         ImGui.separator()
-        ImGui.text("Log Handling:")
-        if (ImGui.button("Bank logs+nests", 140f, 0f)) script.settings.logHandlingMode = 0
-        ImGui.sameLine(0f, 4f)
-        if (ImGui.button("Magic Notepaper", 130f, 0f)) script.settings.logHandlingMode = 1
-        ImGui.sameLine(0f, 4f)
-        if (ImGui.button("No Bank", 80f, 0f)) script.settings.logHandlingMode = 2
-        ImGui.text("Current: " + when (script.settings.logHandlingMode) {
-            1 -> "Magic Notepaper"
-            2 -> "No Bank"
-            else -> "Bank logs + nests"
-        })
+        // Option to use/withdraw a Wood Box during banking
+        var wb = script.settings.withdrawWoodBox
+        wb = ImGui.checkbox("Withdrawal Wood Box", wb)
+        script.settings.withdrawWoodBox = wb
     }
 
     private fun drawCore() {
@@ -965,7 +955,6 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         ImGui.separator()
         ImGui.text("Target: ${script.targetTree}")
         ImGui.text("Phase: ${script.phase}")
-        ImGui.text("Banking enabled: ${script.bankWhenFull}")
         ImGui.text("Log handling: " + when (script.settings.logHandlingMode) {
             1 -> "Magic Notepaper"
             2 -> "No Bank"

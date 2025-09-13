@@ -28,6 +28,7 @@ class UberChop : SuspendableScript() {
     var targetTree: String = "Tree"
     var location: String = ""
     var bankWhenFull: Boolean = false
+    var withdrawWoodBox: Boolean = false
     var logsChopped: Int = 0
     var status: String = "Idle"
     @Volatile var phase: Phase = Phase.READY
@@ -54,6 +55,8 @@ class UberChop : SuspendableScript() {
         logger.info("Activated: tree='$targetTree', location='$location' (locations=${treeLocations.size})")
         status = "Active - Preparing"
         phase = Phase.PREPARING
+        // sync cached flags from settings
+        withdrawWoodBox = settings.withdrawWoodBox
         totalRuntimeMs = 0L
         lastRuntimeUpdateMs = System.currentTimeMillis()
     }
@@ -68,6 +71,8 @@ class UberChop : SuspendableScript() {
         val now = System.currentTimeMillis()
         if (lastRuntimeUpdateMs != 0L) totalRuntimeMs += (now - lastRuntimeUpdateMs)
         lastRuntimeUpdateMs = now
+        // sync cached flags from settings to reflect GUI changes
+        withdrawWoodBox = settings.withdrawWoodBox
 
         when (phase) {
             Phase.READY -> {
@@ -75,7 +80,58 @@ class UberChop : SuspendableScript() {
                 phase = Phase.PREPARING
             }
             Phase.PREPARING -> {
+                // Configuration summary before moving to active loop
+                logger.info("Preparing: target='{}', location='{}'", targetTree, location)
+                logger.info(
+                    "Preparing: withdrawWoodBox={}, bankWhenFull={}, worldHop={}, notepaper={}, crystallise={}, rotation={}, pickupNests={}",
+                    withdrawWoodBox,
+                    bankWhenFull,
+                    settings.enableWorldHopping,
+                    settings.useMagicNotepaper,
+                    settings.useCrystallise,
+                    settings.enableTreeRotation,
+                    settings.pickupNests
+                )
+                val prepChop = effectiveChopCoordinate()
+                val prepBank = effectiveBankCoordinate()
+                logger.info("Preparing: chopTile={}, bankTile={}", prepChop ?: "none", prepBank ?: "none")
                 logger.info("Phase: PREPARING -> CHOPPING")
+                // Wait to be idle only if currently animating, and handle null player safely
+                val currentAnim = LocalPlayer.self()?.animationId ?: -1
+                if (currentAnim != -1) {
+                    awaitUntil { (LocalPlayer.self()?.animationId ?: -1) == -1 }
+                }
+
+                // Wait to not be moving
+                if (LocalPlayer.self().isMoving) {
+                    awaitUntil { !LocalPlayer.self().isMoving }
+                }
+
+                // Walk near configured bank tile if present
+                val bankTile = effectiveBankCoordinate()
+                if (bankTile != null && !Coordinates.isPlayerWithinRadius(bankTile, 10)) {
+                    logger.info("Walking to bank tile $bankTile")
+                    val walkCoordinates = Coordinates.randomReachableNear(bankTile, 10, 32)
+                    Traverse.walkTo(walkCoordinates, true)
+                    awaitTicks(1)
+                    return
+                }
+
+                // Open the bank if not open already
+                if (!Bank.isOpen()) {
+                    val opened = Bank.open(this)
+                    logger.info("Bank.open() -> $opened")
+                    awaitTicks(1)
+                    return
+                }
+
+                val woodBoxPat = java.util.regex.Pattern.compile(".*wood box.*", java.util.regex.Pattern.CASE_INSENSITIVE)
+                if (!Backpack.contains(woodBoxPat) && withdrawWoodBox) {
+                    Bank.withdraw(woodBoxPat, 1)
+                    awaitTicks(1)
+                    return
+                }
+
                 phase = Phase.CHOPPING
             }
             Phase.BANKING -> {
@@ -112,30 +168,33 @@ class UberChop : SuspendableScript() {
                 if (!Backpack.isFull()) {
                     phase = Phase.CHOPPING
                 } else {
-                    val woodBox = Backpack.getItem({ n, h -> h.toString().contains(n, true) }, "wood box")
-                    if (woodBox != null) {
-                        if (Bank.isOpen()) {
+                    if (withdrawWoodBox) {
+                        val woodBox = Backpack.getItem({ n, h -> h.toString().contains(n, true) }, "wood box")
+                        if (woodBox != null && Bank.isOpen()) {
                             logger.info("Emptying wood box via bank option or backpack fallback")
                             Bank.emptyBox(this, woodBox.name, "Empty - logs and bird's nests")
                             awaitTicks(1)
                         }
                     }
-                    logger.info("Depositing logs and nests")
                     val logsPat = java.util.regex.Pattern.compile(".*logs.*", java.util.regex.Pattern.CASE_INSENSITIVE)
-                    val nestsPat = java.util.regex.Pattern.compile(".*nest.*", java.util.regex.Pattern.CASE_INSENSITIVE)
+                    logger.info("Depositing logs $logsPat")
                     Bank.depositAll(this, logsPat)
-                    Bank.depositAll(this, nestsPat)
                     awaitTicks(1)
                 }
 
             }
             Phase.CHOPPING -> {
                 if (Backpack.isFull()) {
-                    val woodBox = Backpack.getItem({ n, h -> h.toString().contains(n, true) }, "wood box")
-                    if (woodBox != null) {
-                        woodBox.let { Backpack.interact(it, "Fill") }
-                        awaitTicks(1)
-                        if (Backpack.isFull()) {
+                    if (withdrawWoodBox) {
+                        val woodBox = Backpack.getItem({ n, h -> h.toString().contains(n, true) }, "wood box")
+                        if (woodBox != null) {
+                            woodBox.let { Backpack.interact(it, "Fill") }
+                            awaitTicks(1)
+                            if (Backpack.isFull()) {
+                                phase = Phase.BANKING
+                                return
+                            }
+                        } else {
                             phase = Phase.BANKING
                             return
                         }

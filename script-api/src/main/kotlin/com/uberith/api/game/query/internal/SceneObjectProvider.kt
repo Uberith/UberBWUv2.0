@@ -1,4 +1,4 @@
-package com.uberith.api.game.world.internal
+package com.uberith.api.game.query.internal
 
 import java.util.regex.Pattern
 

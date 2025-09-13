@@ -59,6 +59,9 @@ data class Settings(
     var savedLocation: String = "",
     var logHandlingMode: Int = 0,
 
+    // Items
+    var withdrawWoodBox: Boolean = false,
+
     // Custom per-location overrides: location name -> custom tiles
     var customLocations: MutableMap<String, CustomLocation> = mutableMapOf(),
 

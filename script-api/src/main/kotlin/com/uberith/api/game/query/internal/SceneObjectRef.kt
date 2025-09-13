@@ -1,4 +1,4 @@
-package com.uberith.api.game.world.internal
+package com.uberith.api.game.query.internal
 
 /**
  * Lightweight, client-agnostic representation of a scene object.

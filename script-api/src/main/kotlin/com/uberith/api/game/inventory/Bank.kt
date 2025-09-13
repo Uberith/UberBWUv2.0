@@ -1,6 +1,36 @@
 package com.uberith.api.game.inventory
 
+/**
+ * Bank API utilities and high-level helpers.
+ *
+ * Scope
+ * - Provides imperative and suspendable helpers to open the bank, detect its state,
+ *   and perform common interactions (deposit backpack/equipment, deposit matching items,
+ *   load presets, etc.).
+ *
+ * Key Concepts
+ * - Interface wiring: This implementation targets interface id 517 (the Bank UI) and relies on
+ *   child component ids and option text to drive interactions. See [INTERFACE_INDEX] and
+ *   [COMPONENT_INDEX] for the key probes used to determine visibility/state.
+ * - Queries: Uses lightweight query builders (ComponentQuery, InventoryItemQuery, SceneObjectQuery,
+ *   NpcQuery) to discover actionable UI components and world entities.
+ * - Logging: Methods log intent and decisions extensively to aid debugging and telemetry in scripts.
+ * - Suspendable parity: For most operations there is a suspendable variant that performs the same
+ *   action and then yields for a small number of ticks so coroutine-driven scripts can pace actions.
+ *
+ * Safety / Robustness
+ * - Reflection-based isOpen(): Tries Interfaces.isOpen(interfaceId) via reflection to avoid hard
+ *   dependencies. Falls back to probing for a known component when reflection is unavailable.
+ * - Defensive checks are included around null components, empty result sets, and option availability.
+ */
+
 import com.uberith.api.SuspendableScript
+import com.uberith.api.game.query.ComponentQuery
+import com.uberith.api.game.query.InventoryItemQuery
+import com.uberith.api.game.query.SceneObjectQuery
+import com.uberith.api.game.query.NpcQuery
+import com.uberith.api.game.query.result.ResultSet
+import com.uberith.api.nearest
 import net.botwithus.rs3.interfaces.Component
 import net.botwithus.rs3.inventories.Inventory
 import net.botwithus.rs3.inventories.InventoryManager
@@ -11,12 +41,7 @@ import net.botwithus.rs3.minimenu.MiniMenu
 import net.botwithus.rs3.vars.VarDomain
 import net.botwithus.rs3.world.Distance
 import net.botwithus.util.Rand
-import net.botwithus.xapi.query.ComponentQuery
-import net.botwithus.xapi.query.InventoryItemQuery
-import net.botwithus.xapi.query.NpcQuery
-import net.botwithus.xapi.query.SceneObjectQuery
-import net.botwithus.xapi.query.result.ResultSet
-import net.botwithus.xapi.script.permissive.base.PermissiveScript
+import com.uberith.api.script.permissive.base.PermissiveScript
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import java.util.*
@@ -25,11 +50,22 @@ import java.util.regex.Pattern
 import java.util.stream.Collectors
 
 object Bank {
+    /**
+     * Varbit/Varp ids and other static configuration used by the Bank UI.
+     *
+     * PRESET_BROWSING_VARBIT_ID toggles the preset-browsing page (10+ presets). The loadPreset flow
+     * will click the appropriate tab first when necessary so that the requested preset index is
+     * visible.
+     */
     private const val PRESET_BROWSING_VARBIT_ID = 49662
     private const val SELECTED_OPTIONS_TAB_VARBIT_ID = 45191
     private const val WITHDRAW_TYPE_VARBIT_ID = 45189
     private const val WITHDRAW_X_VARP_ID = 111
 
+    /**
+     * Regex used to identify bank-related scene objects in the world. This excludes objects whose
+     * name contains "deposit" to avoid matching deposit-only decorations.
+     */
     private val BANK_NAME_PATTERN: Pattern = Pattern.compile("^(?!.*deposit).*(bank|counter).*$", Pattern.CASE_INSENSITIVE)
     private const val LAST_PRESET_OPTION = "Load Last Preset from"
     private const val INVENTORY_ID = 95
@@ -38,8 +74,18 @@ object Bank {
 
     private val logger: Logger = LoggerFactory.getLogger(Bank::class.java)
 
+    /**
+     * Cache of the last successfully loaded preset index. Helpful for scripts that want to avoid
+     * repeatedly loading the same preset in quick succession.
+     */
     private var previousLoadedPreset = -1
 
+    /**
+     * Opens the bank by interacting with the nearest valid object or NPC.
+     *
+     * @param script logging + delay helper
+     * @return true if an interaction was issued (not a guarantee the UI opened)
+     */
     fun open(script: PermissiveScript): Boolean {
         return try {
             logger.info("Attempting find bank obj")
@@ -102,8 +148,13 @@ object Bank {
         }
     }
 
+    /**
+     * Checks whether the bank interface is open.
+     *
+     * @return true if the bank UI is currently visible
+     */
     fun isOpen(): Boolean {
-        // Prefer the official Interfaces.isOpen via reflection (avoids hard compile dependency)
+        // Try direct platform API via reflection to avoid hard module dependency issues
         try {
             val cls = Class.forName("net.botwithus.rs3.interfaces.Interfaces")
             val m = cls.getMethod("isOpen", Int::class.javaPrimitiveType)
@@ -113,7 +164,6 @@ object Bank {
         } catch (t: Throwable) {
             logger.debug("[Bank] Interfaces.isOpen reflection failed: {}", t.message)
         }
-
         // Fallback: presence of a known bank component under interface 517
         return try {
             val comp = ComponentQuery.newQuery(INTERFACE_INDEX).id(COMPONENT_INDEX).results().first()
@@ -125,10 +175,25 @@ object Bank {
             false
         }
     }
+    /**
+     * Closes the bank via the close-button component action.
+     *
+     * @return true if a click action was issued
+     */
     fun close(): Boolean = MiniMenu.doAction(Action.COMPONENT, 1, -1, 33882430) > 0
 
+    /**
+     * Gets the bank inventory handle (id = 95).
+     *
+     * @return the bank [Inventory] or null if unavailable
+     */
     fun getInventory(): Inventory? = InventoryManager.getInventory(INVENTORY_ID)
 
+    /**
+     * Loads the "Last preset" using the nearest valid object or NPC.
+     *
+     * @return true if an interaction to load the last preset was issued
+     */
     fun loadLastPreset(): Boolean {
         val obj = SceneObjectQuery.newQuery().option(LAST_PRESET_OPTION).results().nearest()
         val npc = NpcQuery.newQuery().option(LAST_PRESET_OPTION).results().nearest()
@@ -147,6 +212,7 @@ object Bank {
         } else false
     }
 
+    /** Returns a snapshot of non-empty item stacks currently visible in the bank container. */
     fun getItems(): Array<Item> =
         InventoryItemQuery.newQuery(INVENTORY_ID).results()
             .stream().filter { it.id != -1 }
@@ -154,126 +220,408 @@ object Bank {
             .toList()
             .toTypedArray()
 
+    /**
+     * Sums quantities across a result set of inventory items.
+     *
+     * @param results inventory items to total
+     * @return total quantity across all entries
+     */
     fun count(results: ResultSet<InventoryItem>): Int = results.stream().mapToInt(Item::getQuantity).sum()
 
+    /**
+     * Gets the first matching bank item for a query.
+     *
+     * @param query item query over bank inventory id (95)
+     * @return the first matching [Item] or null
+     */
     fun first(query: InventoryItemQuery): Item? = query.results().first()
 
+    /**
+     * Checks whether the bank has no items.
+     *
+     * @return true if the bank snapshot is empty
+     */
     fun isEmpty(): Boolean = getItems().isEmpty()
 
+    /**
+     * Interacts with a bank item at [slot] using a UI option index.
+     *
+     * @param slot bank item slot (0-based)
+     * @param option component option index (implementation-defined)
+     * @return true if the interaction was issued
+     */
     fun interact(slot: Int, option: Int): Boolean {
         val results: ResultSet<InventoryItem> = InventoryItemQuery.newQuery(INVENTORY_ID).slot(slot).results()
         val item = results.first()
-        if (item != null) {
-            logger.info("[Inventory#interact(slot, option)]: ${item.id}")
-            val queryResults = ComponentQuery.newQuery(INTERFACE_INDEX).id(COMPONENT_INDEX).itemId(item.id).results()
-            logger.info("[Inventory#interact(slot, option)]: QueryResults: ${queryResults.size()}")
-            val result = queryResults.first()
-            return result != null && result.interact(option) > 0
+        if (item == null) {
+            logger.info("[Bank] interact(slot={}, option={}): no item in slot", slot, option)
+            return false
         }
-        return false
+        logger.info("[Bank] interact(slot={}, option={}): item id={}, name='{}'", slot, option, item.id, item.name)
+
+        // First try: grid component id + item id
+        var comps = ComponentQuery.newQuery(INTERFACE_INDEX).id(COMPONENT_INDEX).itemId(item.id).results()
+        logger.info("[Bank] interact(slot={}, option={}): grid match count={} (compId={})", slot, option, comps.size(), COMPONENT_INDEX)
+
+        // Fallback: any component under interface with matching item id
+        if (comps.size() == 0) {
+            comps = ComponentQuery.newQuery(INTERFACE_INDEX).itemId(item.id).results()
+            logger.info("[Bank] interact(slot={}, option={}): iface-wide match count={} (no compId filter)", slot, option, comps.size())
+        }
+
+        var comp = comps.first()
+        if (comp == null) {
+            // Last-ditch: scan all components (and children) for a withdraw-capable component
+            // that references the item by name in text/optionBase.
+            val all = ComponentQuery.newQuery(INTERFACE_INDEX).results().toList()
+            fun hasWithdraw(c: net.botwithus.rs3.interfaces.Component): Boolean =
+                try { c.options?.any { it != null && it.contains("Withdraw", ignoreCase = true) } == true } catch (_: Throwable) { false }
+            fun nameMatch(c: net.botwithus.rs3.interfaces.Component): Boolean {
+                val nm = item.name ?: return false
+                val inText = try { (c.text ?: "").contains(nm, ignoreCase = true) } catch (_: Throwable) { false }
+                val inBase = try { (c.optionBase ?: "").contains(nm, ignoreCase = true) } catch (_: Throwable) { false }
+                return inText || inBase
+            }
+            comp = all.firstOrNull { hasWithdraw(it) && (it.itemId == item.id || nameMatch(it)) }
+            if (comp == null) {
+                // search children too
+                val child = all.asSequence()
+                    .mapNotNull { it.children }
+                    .flatten()
+                    .firstOrNull { hasWithdraw(it) && (it.itemId == item.id || nameMatch(it)) }
+                comp = child
+            }
+            if (comp == null) {
+                logger.info("[Bank] interact(slot={}, option={}): no component found for item id={} (name match failed)", slot, option, item.id)
+                return false
+            } else {
+                logger.info("[Bank] interact(slot={}, option={}): using name-based fallback componentId={}", slot, option, comp.componentId)
+            }
+        }
+
+        val opts = try { comp.options } catch (_: Throwable) { null }
+        logger.info("[Bank] interact(slot={}, option={}): compId={}, options={} ", slot, option, comp.componentId, opts)
+
+        // Prefer textual withdraw actions if present; fall back to numeric option index
+        val ok = when {
+            opts != null && option == 1 && opts.contains("Withdraw-1") -> {
+                logger.info("[Bank] interact: using action 'Withdraw-1'")
+                comp.interact("Withdraw-1") > 0
+            }
+            opts != null && opts.contains("Withdraw-All") -> {
+                logger.info("[Bank] interact: using action 'Withdraw-All'")
+                comp.interact("Withdraw-All") > 0
+            }
+            opts != null && opts.any { it != null && it.contains("Withdraw", ignoreCase = true) } -> {
+                val first = opts.firstOrNull { it != null && it.contains("Withdraw", ignoreCase = true) }
+                logger.info("[Bank] interact: using first withdraw action '{}'", first)
+                first != null && comp.interact(first) > 0
+            }
+            else -> {
+                logger.info("[Bank] interact: using numeric option {}", option)
+                comp.interact(option) > 0
+            }
+        }
+        logger.info("[Bank] interact(slot={}, option={}): result -> {}", slot, option, ok)
+        return ok
     }
 
+    /** Returns true if the given item query matches any items in the bank. */
     fun contains(query: InventoryItemQuery): Boolean = count(query.results()) > 0
 
+    /** True if any of the provided item names are present in the bank. */
     fun contains(vararg itemNames: String): Boolean =
-        !InventoryItemQuery.newQuery(INVENTORY_ID).name(*itemNames).results().isEmpty
+        !InventoryItemQuery.newQuery(INVENTORY_ID).name(*itemNames).results().isEmpty()
 
+    /** True if any item with a name matching the regex pattern is present. */
     fun contains(itemNamePattern: Pattern): Boolean =
-        !InventoryItemQuery.newQuery(INVENTORY_ID).name(itemNamePattern).results().isEmpty
+        !InventoryItemQuery.newQuery(INVENTORY_ID).name(itemNamePattern).results().isEmpty()
 
+    /** Returns the total quantity across all stacks that match any of the provided names. */
     fun getCount(vararg itemNames: String): Int =
         count(InventoryItemQuery.newQuery(INVENTORY_ID).name(*itemNames).results())
 
+    /** Returns the total quantity across all stacks whose name matches the given pattern. */
     fun getCount(namePattern: Pattern): Int =
         count(InventoryItemQuery.newQuery(INVENTORY_ID).name(namePattern).results())
 
+    /**
+     * Withdraws the first item matching [query] using the given option index.
+     *
+     * @param query item query over bank inventory id (95)
+     * @param option option index to invoke
+     * @return true if an interaction was issued
+     */
     fun withdraw(query: InventoryItemQuery, option: Int): Boolean {
+        logger.info("[Bank] withdraw(query, option={}): begin", option)
         setTransferOption(TransferOptionType.ALL)
         val item = query.results().first()
         if (item != null) {
-            logger.info("Item: ${item.name}")
+            logger.info("[Bank] withdraw(query): item name='{}', id={}, slot={}", item.name, item.id, item.slot)
         } else {
-            logger.info("Item is null")
+            logger.info("[Bank] withdraw(query): no item matched")
         }
-        return item != null && interact(item.slot, option)
+        val ok = item != null && interact(item.slot, option)
+        logger.info("[Bank] withdraw(query, option={}): end -> {}", option, ok)
+        return ok
     }
 
+    /** Withdraws the first item matching the given name with the specified option index. */
+    /**
+     * Withdraws by exact item [itemName].
+     * @param itemName exact item name (case-sensitive)
+     * @param option option index to use
+     * @return true if an interaction was sent
+     */
     fun withdraw(itemName: String?, option: Int): Boolean {
-        if (itemName != null && itemName.isNotEmpty()) {
-            return withdraw(InventoryItemQuery.newQuery(INVENTORY_ID).name(itemName), option)
-        }
-        return false
+        logger.info("[Bank] withdraw(name='{}', option={}): begin", itemName, option)
+        val ok = if (!itemName.isNullOrEmpty())
+            withdraw(InventoryItemQuery.newQuery(INVENTORY_ID).name(itemName), option)
+        else false
+        logger.info("[Bank] withdraw(name='{}', option={}): end -> {}", itemName, option, ok)
+        return ok
     }
 
+    /** Withdraws by item id (if non-negative) using the specified option index. */
+    /**
+     * Withdraws by item id (if non-negative).
+     * @param itemId item definition id
+     * @param option option index
+     * @return true if interaction was sent
+     */
     fun withdraw(itemId: Int, option: Int): Boolean {
-        return if (itemId >= 0) {
-            withdraw(InventoryItemQuery.newQuery(INVENTORY_ID).id(itemId), option)
-        } else false
+        logger.info("[Bank] withdraw(id={}, option={}): begin", itemId, option)
+        val ok = if (itemId >= 0) withdraw(InventoryItemQuery.newQuery(INVENTORY_ID).id(itemId), option) else false
+        logger.info("[Bank] withdraw(id={}, option={}): end -> {}", itemId, option, ok)
+        return ok
     }
 
+    /** Withdraws the first item whose name matches the regex [pattern]. */
+    /**
+     * Withdraws the first item whose name matches [pattern].
+     * @param pattern regex to match item names
+     * @param option option index
+     * @return true if interaction was sent
+     */
     fun withdraw(pattern: Pattern?, option: Int): Boolean {
-        return if (pattern != null) {
-            withdraw(InventoryItemQuery.newQuery(INVENTORY_ID).name(pattern), option)
-        } else false
+        logger.info("[Bank] withdraw(pattern={}, option={}): begin", pattern, option)
+        val ok = if (pattern != null) withdraw(InventoryItemQuery.newQuery(INVENTORY_ID).name(pattern), option) else false
+        logger.info("[Bank] withdraw(pattern={}, option={}): end -> {}", pattern, option, ok)
+        return ok
     }
 
+    /**
+     * Withdraws all of an item by exact name using option index 1.
+     *
+     * @param name exact item name
+     * @return true if an interaction was issued
+     */
     fun withdrawAll(name: String): Boolean = withdraw(InventoryItemQuery.newQuery(INVENTORY_ID).name(name), 1)
+
+    /**
+     * Withdraws all of an item by id using option index 1.
+     *
+     * @param id item definition id
+     * @return true if an interaction was issued
+     */
     fun withdrawAll(id: Int): Boolean = withdraw(InventoryItemQuery.newQuery(INVENTORY_ID).id(id), 1)
+
+    /**
+     * Withdraws all of an item matching [pattern] using option index 1.
+     *
+     * @param pattern regex to match item names
+     * @return true if an interaction was issued
+     */
     fun withdrawAll(pattern: Pattern): Boolean = withdraw(InventoryItemQuery.newQuery(INVENTORY_ID).name(pattern), 1)
 
+    /**
+     * Deposits carried items via the bank UI button.
+     *
+     * @return true if the “Deposit carried items” action was issued successfully
+     */
     fun depositAll(): Boolean {
+        logger.info("[Bank] depositAll(): begin")
         setTransferOption(TransferOptionType.ALL)
         val comp = ComponentQuery.newQuery(INTERFACE_INDEX).option("Deposit carried items").results().first()
-        return comp != null && comp.interact(1) > 0
+        val found = comp != null
+        logger.info("[Bank] depositAll(): component {}", if (found) "found" else "not-found")
+        val ok = found && comp!!.interact(1) > 0
+        logger.info("[Bank] depositAll(): interact -> {}", ok)
+        return ok
     }
 
+    /** Deposits equipment via its dedicated component in the bank UI. */
+    /**
+     * Deposits worn equipment using the bank UI control.
+     * @return true if the click was sent
+     */
     fun depositEquipment(): Boolean {
         val component = ComponentQuery.newQuery(INTERFACE_INDEX).id(42).results().first()
         return component != null && component.interact(1) > 0
     }
 
+    /** Deposits the backpack via its dedicated component in the bank UI. */
+    /**
+     * Deposits backpack contents using the bank UI control.
+     * @return true if the click was sent
+     */
     fun depositBackpack(): Boolean {
         val component = ComponentQuery.newQuery(INTERFACE_INDEX).id(39).results().first()
         return component != null && component.interact(1) > 0
     }
 
+    /** Deposits a component resolved by the provided query using a given option index. */
+    /**
+     * Deposits using a [ComponentQuery] to resolve the target, applying a specific option.
+     *
+     * @param script logging + delay helper
+     * @param query component query targeting bank item components
+     * @param option option index to invoke
+     * @return true if interaction was sent
+     */
     fun deposit(script: PermissiveScript, query: ComponentQuery, option: Int): Boolean {
-        val item = query.results().first()
-        return deposit(script, item, option)
+        logger.info("[Bank] deposit(query, option={}): begin (isOpen={})", option, isOpen())
+        val rs = query.results()
+        logger.info("[Bank] deposit(query): result size={}", rs.size())
+        if (rs.size() == 0) {
+            val probe = ComponentQuery.newQuery(INTERFACE_INDEX).results()
+            logger.info("[Bank] deposit(query): iface {} total comps={} (sample up to 5 ids={})", INTERFACE_INDEX, probe.size(), probe.stream().limit(5).map { it.componentId }.toList())
+        }
+        val item = rs.first()
+        val ok = deposit(script, item, option)
+        logger.info("[Bank] deposit(query, option={}): end -> {}", option, ok)
+        return ok
     }
 
+    
+    /**
+     * Deposits with a [ComponentQuery] using “Deposit-All/Deposit-1” semantics (option 1).
+     * @return true if interaction was sent
+     */
     fun depositAll(script: PermissiveScript, query: ComponentQuery): Boolean {
-        val item = query.results().first()
-        return deposit(script, item, 1)
+        logger.info("[Bank] depositAll(query): begin (isOpen={})", isOpen())
+        val rs = query.results()
+        logger.info("[Bank] depositAll(query): result size={}", rs.size())
+        if (rs.size() == 0) {
+            val probe = ComponentQuery.newQuery(INTERFACE_INDEX).results()
+            logger.info("[Bank] depositAll(query): iface {} total comps={} (sample up to 5 ids={})", INTERFACE_INDEX, probe.size(), probe.stream().limit(5).map { it.componentId }.toList())
+        }
+        val item = rs.first()
+        val ok = deposit(script, item, 1)
+        logger.info("[Bank] depositAll(query): end -> {}", ok)
+        return ok
     }
 
+    
+    /**
+     * Low-level deposit on a specific bank component, preferring textual options when present.
+     *
+     * When [Component.options] include strings, this prefers “Deposit-All” then “Deposit”.
+     * Otherwise falls back to numeric [option].
+     *
+     * @param script logging + delay helper
+     * @param comp target bank component; null-safe (returns false)
+     * @param option numeric option index to use when no textual actions are present
+     * @return true if the interaction was issued
+     */
     fun deposit(script: PermissiveScript, comp: Component?, option: Int): Boolean {
+        logger.info("[Bank] deposit(comp, option={}): begin", option)
         setTransferOption(TransferOptionType.ALL)
-        val valRes = comp != null && comp.interact(option) > 0
-        if (valRes) script.delay(Rand.nextInt(1, 2))
-        return valRes
+        if (comp == null) {
+            logger.warn("[Bank] deposit(comp, option={}): component is null", option)
+            return false
+        }
+        val opts = try { comp.options } catch (_: Throwable) { null }
+        logger.info("[Bank] deposit(comp, option={}): compId={}, opts={} ", option, comp.componentId, opts)
+        val ok = when {
+            opts != null && opts.contains("Deposit-All") -> {
+                logger.info("[Bank] deposit(comp): using action 'Deposit-All'")
+                comp.interact("Deposit-All") > 0
+            }
+            opts != null && opts.contains("Deposit") -> {
+                logger.info("[Bank] deposit(comp): using action 'Deposit'")
+                comp.interact("Deposit") > 0
+            }
+            else -> {
+                logger.info("[Bank] deposit(comp): using option index {}", option)
+                comp.interact(option) > 0
+            }
+        }
+        logger.info("[Bank] deposit(comp, option={}): interact -> {}", option, ok)
+        if (ok) script.delay(Rand.nextInt(1, 2))
+        return ok
     }
 
+    /** Deposits all items whose names exactly match any of the provided [itemNames]. */
+    /**
+     * Deposits all items whose names match any of [itemNames] exactly.
+     *
+     * @param script logging + delay helper
+     * @param itemNames exact item names to deposit
+     * @return true if at least one id was resolved and all deposits succeeded
+     */
     fun depositAll(script: PermissiveScript, vararg itemNames: String): Boolean {
-        return !InventoryItemQuery.newQuery(93).name(*itemNames).results().stream()
-            .map { it.id }.distinct()
-            .map { i: Int -> depositAll(script, ComponentQuery.newQuery(517).itemId(i)) }
-            .toList().contains(false)
+        logger.info("[Bank] depositAll(names): begin names={} ", Arrays.toString(itemNames))
+        val ids = InventoryItemQuery.newQuery(93).name(*itemNames).results().stream()
+            .map { it.id }.distinct().toList()
+        logger.info("[Bank] depositAll(names): resolved ids={} (count={})", ids, ids.size)
+        var allOk = true
+        for (id in ids) {
+            var ok = depositAll(script, ComponentQuery.newQuery(517).id(COMPONENT_INDEX).itemId(id))
+            if (!ok) {
+                logger.info("[Bank] depositAll(names): bank component not found; fallback to backpack for id={}", id)
+                ok = Backpack.interact("Deposit-All", id) || Backpack.interact("Deposit-1", id)
+            }
+            logger.info("[Bank] depositAll(names): id={} -> {}", id, ok)
+            allOk = allOk && ok
+        }
+        logger.info("[Bank] depositAll(names): end -> {}", allOk && ids.isNotEmpty())
+        return allOk && ids.isNotEmpty()
     }
 
+    /** Deposits all items whose ids match any of the provided [itemIds]. */
+    /** Deposits all items whose ids match any of [itemIds]. */
     fun depositAll(script: PermissiveScript, vararg itemIds: Int): Boolean {
-        return !InventoryItemQuery.newQuery(93).id(*itemIds).results().stream()
-            .map { it.id }.distinct()
-            .map { i: Int -> depositAll(script, ComponentQuery.newQuery(517).itemId(i)) }
-            .toList().contains(false)
+        logger.info("[Bank] depositAll(ids): begin ids={} ", Arrays.toString(itemIds))
+        val ids = InventoryItemQuery.newQuery(93).id(*itemIds).results().stream()
+            .map { it.id }.distinct().toList()
+        logger.info("[Bank] depositAll(ids): resolved ids={} (count={})", ids, ids.size)
+        var allOk = true
+        for (id in ids) {
+            var ok = depositAll(script, ComponentQuery.newQuery(517).id(COMPONENT_INDEX).itemId(id))
+            if (!ok) {
+                logger.info("[Bank] depositAll(ids): bank component not found; fallback to backpack for id={}", id)
+                ok = Backpack.interact("Deposit-All", id) || Backpack.interact("Deposit-1", id)
+            }
+            logger.info("[Bank] depositAll(ids): id={} -> {}", id, ok)
+            allOk = allOk && ok
+        }
+        logger.info("[Bank] depositAll(ids): end -> {}", allOk && ids.isNotEmpty())
+        return allOk && ids.isNotEmpty()
     }
 
+    /** Deposits all items whose names match any of the provided regex [patterns]. */
+    /** Deposits all items whose names match any of the regex [patterns]. */
     fun depositAll(script: PermissiveScript, vararg patterns: Pattern): Boolean {
-        return !InventoryItemQuery.newQuery(93).name(*patterns).results().stream()
-            .map { it.id }.distinct()
-            .map { i: Int -> depositAll(script, ComponentQuery.newQuery(517).itemId(i)) }
-            .toList().contains(false)
+        logger.info("[Bank] depositAll(patterns): begin patternsCount={}", patterns.size)
+        val ids = InventoryItemQuery.newQuery(93).name(*patterns).results().stream()
+            .map { it.id }.distinct().toList()
+        logger.info("[Bank] depositAll(patterns): resolved ids={} (count={})", ids, ids.size)
+        var allOk = true
+        for (id in ids) {
+            var ok = depositAll(script, ComponentQuery.newQuery(517).id(COMPONENT_INDEX).itemId(id))
+            if (!ok) {
+                logger.info("[Bank] depositAll(patterns): bank component not found; fallback to backpack for id={}", id)
+                ok = Backpack.interact("Deposit-All", id) || Backpack.interact("Deposit-1", id)
+            }
+            logger.info("[Bank] depositAll(patterns): id={} -> {}", id, ok)
+            allOk = allOk && ok
+        }
+        logger.info("[Bank] depositAll(patterns): end -> {}", allOk && ids.isNotEmpty())
+        return allOk && ids.isNotEmpty()
     }
+
+    
 
     // Empty-Box helpers (e.g., "Empty - logs and bird's nests") within the Bank interface
     fun emptyBox(option: String): Boolean {
@@ -281,7 +629,7 @@ object Bank {
             logger.info("[Bank] emptyBox(option='{}'): bank not open", option)
             return false
         }
-        val comp = ComponentQuery.newQuery(INTERFACE_INDEX).option(option).results().first()
+        val comp = ComponentQuery.newQuery(INTERFACE_INDEX).option(option).results().firstOrNull()
         val ok = comp != null && (comp.interact(1) > 0 || comp.interact(option) > 0)
         logger.info(
             "[Bank] emptyBox(option='{}'): component {} -> {}",
@@ -320,7 +668,7 @@ object Bank {
                 bpItem?.let { "${it.name} (${it.id})" } ?: "null"
             )
             if (bpItem != null) {
-                val comp = ComponentQuery.newQuery(INTERFACE_INDEX).id(COMPONENT_INDEX).itemId(bpItem.id).results().first()
+                val comp = ComponentQuery.newQuery(INTERFACE_INDEX).id(COMPONENT_INDEX).itemId(bpItem.id).results().firstOrNull()
                 logger.debug(
                     "[Bank] emptyBox(name='{}'): bank component by itemId {}",
                     boxName,
@@ -332,8 +680,8 @@ object Bank {
                     if (ok) return true
                 }
             }
-            // 2) Try any component with the given option under the bank interface
-            val anyComp = ComponentQuery.newQuery(INTERFACE_INDEX).option(option).results().first()
+            // 2) Try any component with the given option under the bank interface (exact)
+            val anyComp = ComponentQuery.newQuery(INTERFACE_INDEX).option(option).results().firstOrNull()
             logger.debug(
                 "[Bank] emptyBox(name='{}'): bank component by option '{}' {}",
                 boxName,
@@ -344,6 +692,32 @@ object Bank {
                 logger.info("[Bank] emptyBox(name='{}'): interact component by option -> true", boxName)
                 return true
             }
+            // 2b) Fuzzy search: any component whose options contain an 'empty' action
+            val results = ComponentQuery.newQuery(INTERFACE_INDEX).results()
+            var fuzzyTried = 0
+            var fuzzyOk = false
+            results.stream().forEach { comp ->
+                try {
+                    val opts = comp.options
+                    if (opts != null) {
+                        for (op in opts) {
+                            if (op != null) {
+                                val s = op.lowercase()
+                                if (s.contains("empty") && (s.contains("log") || s.contains("nest") || s.contains("box"))) {
+                                    fuzzyTried++
+                                    if (comp.interact(op) > 0) {
+                                        logger.info("[Bank] emptyBox(name='{}'): fuzzy component option '{}' -> true", boxName, op)
+                                        fuzzyOk = true
+                                        return@forEach
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Throwable) { }
+            }
+            logger.debug("[Bank] emptyBox(name='{}'): fuzzy options tried {} -> {}", boxName, fuzzyTried, fuzzyOk)
+            if (fuzzyOk) return true
             // 3) Last-resort: interact with the backpack item directly using the provided option
             val ok = if (bpItem != null) Backpack.interact(bpItem, option) else false
             logger.info("[Bank] emptyBox(name='{}'): fallback backpack interact -> {}", boxName, ok)
@@ -378,7 +752,7 @@ object Bank {
             .map(Component::getItemId)
             .collect(Collectors.toSet())
 
-        return !items.stream().map { i: Int -> depositAll(script, ComponentQuery.newQuery(517).itemId(i)) }.toList().contains(false)
+        return !items.stream().map { i: Int -> depositAll(script, ComponentQuery.newQuery(517).id(COMPONENT_INDEX).itemId(i)) }.toList().contains(false)
     }
 
     fun depositAllExcept(script: PermissiveScript, vararg ids: Int): Boolean {
@@ -387,7 +761,7 @@ object Bank {
             .filter { i -> !idSet.contains(i.itemId) && (i.options.contains("Deposit-All") || i.options.contains("Deposit-1")) }
             .map(Component::getItemId)
             .collect(Collectors.toSet())
-        return !items.stream().map { i: Int -> depositAll(script, ComponentQuery.newQuery(517).itemId(i)) }.toList().contains(false)
+        return !items.stream().map { i: Int -> depositAll(script, ComponentQuery.newQuery(517).id(COMPONENT_INDEX).itemId(i)) }.toList().contains(false)
     }
 
     fun depositAllExcept(script: PermissiveScript, vararg patterns: Pattern): Boolean {
@@ -398,11 +772,11 @@ object Bank {
             .filter { i -> !idMap.containsKey(i.itemId) && (i.options.contains("Deposit-All") || i.options.contains("Deposit-1")) }
             .map(Component::getItemId)
             .collect(Collectors.toSet())
-        return !items.stream().map { i: Int -> depositAll(script, ComponentQuery.newQuery(517).itemId(i)) }.toList().contains(false)
+        return !items.stream().map { i: Int -> depositAll(script, ComponentQuery.newQuery(517).id(COMPONENT_INDEX).itemId(i)) }.toList().contains(false)
     }
 
     fun deposit(script: PermissiveScript, itemId: Int, option: Int): Boolean =
-        deposit(script, ComponentQuery.newQuery(517).itemId(itemId), option)
+        deposit(script, ComponentQuery.newQuery(517).id(COMPONENT_INDEX).itemId(itemId), option)
 
     fun deposit(script: PermissiveScript, name: String, spred: BiFunction<String, CharSequence, Boolean>, option: Int): Boolean =
         deposit(script, ComponentQuery.newQuery(517).itemName(name, spred), option)
@@ -410,6 +784,17 @@ object Bank {
     fun deposit(script: PermissiveScript, name: String, option: Int): Boolean =
         deposit(script, name, BiFunction { a, b -> a.contentEquals(b) }, option)
 
+    /**
+     * Loads a numbered preset (1–18). For presets >= 10 the preset browsing tab must be active;
+     * this method toggles it on demand before clicking the target preset.
+     */
+    /**
+     * Loads a numbered preset (1–18), toggling the preset-browsing tab for 10–18 as needed.
+     *
+     * @param script logging + delay helper
+     * @param presetNumber 1..18 (1..9 primary tab, 10..18 browsing tab)
+     * @return true if a click for the target preset was issued
+     */
     fun loadPreset(script: PermissiveScript, presetNumber: Int): Boolean {
         val presetBrowsingValue = VarDomain.getVarBitValue(PRESET_BROWSING_VARBIT_ID)
         if ((presetNumber >= 10 && presetBrowsingValue < 1) || (presetNumber < 10 && presetBrowsingValue > 0)) {
@@ -423,131 +808,218 @@ object Bank {
         return result
     }
 
+    /** Reads a varbit value for the given bank [slot]. Returns [Int.MIN_VALUE] if unavailable. */
     fun getVarbitValue(slot: Int, varbitId: Int): Int {
         val inventory: Inventory? = getInventory()
         return inventory?.getVarbitValue(slot, varbitId) ?: Int.MIN_VALUE
     }
 
+    /** Ensures the current transfer option matches [transferoptionType], clicking if necessary. */
     fun setTransferOption(transferoptionType: TransferOptionType): Boolean {
         val depositOptionState = VarDomain.getVarBitValue(WITHDRAW_TYPE_VARBIT_ID)
         return depositOptionState == transferoptionType.varbitStateValue ||
                 MiniMenu.doAction(Action.COMPONENT, 1, -1, 33882215) > 0
     }
 
+    /** Returns the last successfully loaded preset index for this session. */
     fun getPreviousLoadedPreset(): Int = previousLoadedPreset
 
     // Suspendable overloads for coroutine-based scripts
+    
+    /**
+     * Opens the bank and awaits the interface becoming visible.
+     *
+     * @param script coroutine context with await utilities
+     * @return true if the bank is open after waiting
+     */
     suspend fun open(script: SuspendableScript): Boolean {
         val opened = open(object : PermissiveScript() {})
         if (opened) script.awaitUntil(10) { isOpen() }
         return isOpen()
     }
 
+    
     suspend fun close(script: SuspendableScript): Boolean {
         val res = close()
         if (res) script.awaitUntil(5) { !isOpen() }
         return !isOpen()
     }
 
+    
     suspend fun loadLastPreset(script: SuspendableScript): Boolean {
         val res = loadLastPreset()
         if (res) script.awaitTicks(2)
         return res
     }
 
+    
     suspend fun loadPreset(script: SuspendableScript, presetNumber: Int): Boolean {
         val res = loadPreset(object : PermissiveScript() {}, presetNumber)
         if (res) script.awaitTicks(2)
         return res
     }
 
+    
+    /**
+     * Deposits carried items, then yields for ~1 tick to pace interactions in coroutines.
+     * @return true if the deposit action was issued
+     */
     suspend fun depositAll(script: SuspendableScript): Boolean {
+        logger.info("[Bank] suspend depositAll(): begin")
         val res = depositAll()
+        logger.info("[Bank] suspend depositAll(): base call -> {}", res)
         if (res) script.awaitTicks(1)
+        logger.info("[Bank] suspend depositAll(): end -> {}", res)
         return res
     }
 
-    /** Suspendable variant: deposit a single component by option. */
+    
+    /** Suspendable counterpart to [deposit] that yields briefly on success. */
     suspend fun deposit(script: SuspendableScript, comp: Component?, option: Int): Boolean {
+        logger.info("[Bank] suspend deposit(comp, option={}): begin compId={}", option, comp?.componentId)
         setTransferOption(TransferOptionType.ALL)
         val ok = comp != null && comp.interact(option) > 0
+        logger.info("[Bank] suspend deposit(comp, option={}): interact -> {}", option, ok)
         if (ok) script.awaitTicks(1)
+        logger.info("[Bank] suspend deposit(comp, option={}): end -> {}", option, ok)
         return ok
     }
 
-    /** Suspendable variant: deposit by a component query using option 1 (Deposit-All/Deposit-1). */
+    
+    /** Suspendable convenience variant of [depositAll] using a query. */
+    /** Suspendable counterpart to [depositAll] by query. */
     suspend fun depositAll(script: SuspendableScript, query: ComponentQuery): Boolean {
-        val item = query.results().first()
-        return deposit(script, item, 1)
+        logger.info("[Bank] suspend depositAll(query): begin (isOpen={})", isOpen())
+        val rs = query.results()
+        logger.info("[Bank] suspend depositAll(query): result size={}", rs.size())
+        if (rs.size() == 0) {
+            val probe = ComponentQuery.newQuery(INTERFACE_INDEX).results()
+            logger.info("[Bank] suspend depositAll(query): iface {} total comps={} (sample up to 5 ids={})", INTERFACE_INDEX, probe.size(), probe.stream().limit(5).map { it.componentId }.toList())
+        }
+        val item = rs.first()
+        val ok = deposit(script, item, 1)
+        logger.info("[Bank] suspend depositAll(query): end -> {}", ok)
+        return ok
     }
 
-    /** Suspendable variant: deposit by name(s). */
+    
+    /** Suspendable counterpart to [depositAll] by names. */
     suspend fun depositAll(script: SuspendableScript, vararg itemNames: String): Boolean {
+        logger.info("[Bank] suspend depositAll(names): begin names={}", Arrays.toString(itemNames))
         val ids = InventoryItemQuery.newQuery(93).name(*itemNames).results().stream()
             .map { it.id }.distinct().toList()
+        logger.info("[Bank] suspend depositAll(names): resolved ids={} (count={})", ids, ids.size)
+        var allOk = true
         for (id in ids) {
-            if (!depositAll(script, ComponentQuery.newQuery(517).itemId(id))) return false
+            var ok = depositAll(script, ComponentQuery.newQuery(517).id(COMPONENT_INDEX).itemId(id))
+            if (!ok) {
+                logger.info("[Bank] suspend depositAll(names): bank component not found; fallback to backpack for id={}", id)
+                ok = Backpack.interact("Deposit-All", id) || Backpack.interact("Deposit-1", id)
+                if (ok) script.awaitTicks(1)
+            }
+            logger.info("[Bank] suspend depositAll(names): id={} -> {}", id, ok)
+            allOk = allOk && ok
         }
-        return ids.isNotEmpty()
+        logger.info("[Bank] suspend depositAll(names): end -> {}", allOk && ids.isNotEmpty())
+        return allOk && ids.isNotEmpty()
     }
 
-    /** Suspendable variant: deposit by id(s). */
+    
+    /** Suspendable counterpart to [depositAll] by ids. */
     suspend fun depositAll(script: SuspendableScript, vararg itemIds: Int): Boolean {
+        logger.info("[Bank] suspend depositAll(ids): begin ids={}", Arrays.toString(itemIds))
         val ids = InventoryItemQuery.newQuery(93).id(*itemIds).results().stream()
             .map { it.id }.distinct().toList()
+        logger.info("[Bank] suspend depositAll(ids): resolved ids={} (count={})", ids, ids.size)
+        var allOk = true
         for (id in ids) {
-            if (!depositAll(script, ComponentQuery.newQuery(517).itemId(id))) return false
+            var ok = depositAll(script, ComponentQuery.newQuery(517).id(COMPONENT_INDEX).itemId(id))
+            if (!ok) {
+                logger.info("[Bank] suspend depositAll(ids): bank component not found; fallback to backpack for id={}", id)
+                ok = Backpack.interact("Deposit-All", id) || Backpack.interact("Deposit-1", id)
+                if (ok) script.awaitTicks(1)
+            }
+            logger.info("[Bank] suspend depositAll(ids): id={} -> {}", id, ok)
+            allOk = allOk && ok
         }
-        return ids.isNotEmpty()
+        logger.info("[Bank] suspend depositAll(ids): end -> {}", allOk && ids.isNotEmpty())
+        return allOk && ids.isNotEmpty()
     }
 
-    /** Suspendable variant: deposit by regex pattern(s). */
+    
+    /** Suspendable counterpart to [depositAll] by regex patterns. */
     suspend fun depositAll(script: SuspendableScript, vararg patterns: Pattern): Boolean {
+        logger.info("[Bank] suspend depositAll(patterns): begin patternsCount={}", patterns.size)
         val ids = InventoryItemQuery.newQuery(93).name(*patterns).results().stream()
             .map { it.id }.distinct().toList()
+        logger.info("[Bank] suspend depositAll(patterns): resolved ids={} (count={})", ids, ids.size)
+        var allOk = true
         for (id in ids) {
-            if (!depositAll(script, ComponentQuery.newQuery(517).itemId(id))) return false
+            var ok = depositAll(script, ComponentQuery.newQuery(517).id(COMPONENT_INDEX).itemId(id))
+            if (!ok) {
+                logger.info("[Bank] suspend depositAll(patterns): bank component not found; fallback to backpack for id={}", id)
+                ok = Backpack.interact("Deposit-All", id) || Backpack.interact("Deposit-1", id)
+                if (ok) script.awaitTicks(1)
+            }
+            logger.info("[Bank] suspend depositAll(patterns): id={} -> {}", id, ok)
+            allOk = allOk && ok
         }
-        return ids.isNotEmpty()
+        logger.info("[Bank] suspend depositAll(patterns): end -> {}", allOk && ids.isNotEmpty())
+        return allOk && ids.isNotEmpty()
     }
 
     /**
-     * Suspendable variant: deposit everything except matching names.
-     * Selects all bank component entries that support Deposit-All/Deposit-1 and are not in the keep-set.
+     * Deposits everything except exact names and yields briefly.
+     *
+     * @param script coroutine context with await utilities
+     * @param itemNames exact item names to keep
+     * @return true if there were targets and all deposits succeeded
      */
     suspend fun depositAllExcept(script: SuspendableScript, vararg itemNames: String): Boolean {
+        logger.info("[Bank] suspend depositAllExcept(names): begin names={}", Arrays.toString(itemNames))
         val keepNames = HashSet(listOf(*itemNames))
         val keepIds = Backpack.getItems().stream()
             .filter { it.name != null && keepNames.contains(it.name) }
             .map(Item::getId)
             .collect(Collectors.toSet())
-
+        logger.info("[Bank] suspend depositAllExcept(names): keepIds={} (count={})", keepIds, keepIds.size)
         val itemIds = ComponentQuery.newQuery(517).results().stream()
             .filter { i -> !keepIds.contains(i.itemId) && (i.options.contains("Deposit-All") || i.options.contains("Deposit-1")) }
             .map(Component::getItemId)
             .collect(Collectors.toSet())
-
+        logger.info("[Bank] suspend depositAllExcept(names): targetIds={} (count={})", itemIds, itemIds.size)
+        var allOk = true
         for (id in itemIds) {
-            if (!depositAll(script, ComponentQuery.newQuery(517).itemId(id))) return false
+            val ok = depositAll(script, ComponentQuery.newQuery(517).id(COMPONENT_INDEX).itemId(id))
+            logger.info("[Bank] suspend depositAllExcept(names): id={} -> {}", id, ok)
+            allOk = allOk && ok
         }
-        return itemIds.isNotEmpty()
+        logger.info("[Bank] suspend depositAllExcept(names): end -> {}", allOk && itemIds.isNotEmpty())
+        return allOk && itemIds.isNotEmpty()
     }
 
-    /** Suspendable variant: deposit everything except ids. */
+    
     suspend fun depositAllExcept(script: SuspendableScript, vararg ids: Int): Boolean {
+        logger.info("[Bank] suspend depositAllExcept(ids): begin ids={}", Arrays.toString(ids))
         val idSet = Arrays.stream(ids).boxed().collect(Collectors.toSet())
         val itemIds = ComponentQuery.newQuery(517).results().stream()
             .filter { i -> !idSet.contains(i.itemId) && (i.options.contains("Deposit-All") || i.options.contains("Deposit-1")) }
             .map(Component::getItemId)
             .collect(Collectors.toSet())
+        logger.info("[Bank] suspend depositAllExcept(ids): targetIds={} (count={})", itemIds, itemIds.size)
+        var allOk = true
         for (id in itemIds) {
-            if (!depositAll(script, ComponentQuery.newQuery(517).itemId(id))) return false
+            val ok = depositAll(script, ComponentQuery.newQuery(517).id(COMPONENT_INDEX).itemId(id))
+            logger.info("[Bank] suspend depositAllExcept(ids): id={} -> {}", id, ok)
+            allOk = allOk && ok
         }
-        return itemIds.isNotEmpty()
+        logger.info("[Bank] suspend depositAllExcept(ids): end -> {}", allOk && itemIds.isNotEmpty())
+        return allOk && itemIds.isNotEmpty()
     }
 
-    /** Suspendable variant: deposit everything except regex patterns. */
+    
     suspend fun depositAllExcept(script: SuspendableScript, vararg patterns: Pattern): Boolean {
+        logger.info("[Bank] suspend depositAllExcept(patterns): begin patternsCount={}", patterns.size)
         val idMap = Backpack.getItems().stream()
             .filter { i: Item -> i.name != null && Arrays.stream(patterns).anyMatch { p: Pattern -> p.matcher(i.name).matches() } }
             .collect(Collectors.toMap(Item::getId, Item::getName))
@@ -555,33 +1027,54 @@ object Bank {
             .filter { i -> !idMap.containsKey(i.itemId) && (i.options.contains("Deposit-All") || i.options.contains("Deposit-1")) }
             .map(Component::getItemId)
             .collect(Collectors.toSet())
+        logger.info("[Bank] suspend depositAllExcept(patterns): targetIds={} (count={})", itemIds, itemIds.size)
+        var allOk = true
         for (id in itemIds) {
-            if (!depositAll(script, ComponentQuery.newQuery(517).itemId(id))) return false
+            val ok = depositAll(script, ComponentQuery.newQuery(517).id(COMPONENT_INDEX).itemId(id))
+            logger.info("[Bank] suspend depositAllExcept(patterns): id={} -> {}", id, ok)
+            allOk = allOk && ok
         }
-        return itemIds.isNotEmpty()
+        logger.info("[Bank] suspend depositAllExcept(patterns): end -> {}", allOk && itemIds.isNotEmpty())
+        return allOk && itemIds.isNotEmpty()
     }
 
+    
     suspend fun depositEquipment(script: SuspendableScript): Boolean {
+        logger.info("[Bank] suspend depositEquipment(): begin")
         val res = depositEquipment()
+        logger.info("[Bank] suspend depositEquipment(): base call -> {}", res)
         if (res) script.awaitTicks(1)
+        logger.info("[Bank] suspend depositEquipment(): end -> {}", res)
         return res
     }
 
+    
     suspend fun depositBackpack(script: SuspendableScript): Boolean {
+        logger.info("[Bank] suspend depositBackpack(): begin")
         val res = depositBackpack()
+        logger.info("[Bank] suspend depositBackpack(): base call -> {}", res)
         if (res) script.awaitTicks(1)
+        logger.info("[Bank] suspend depositBackpack(): end -> {}", res)
         return res
     }
 
+    
     suspend fun withdrawAll(script: SuspendableScript, name: String): Boolean {
+        logger.info("[Bank] suspend withdrawAll(name='{}'): begin", name)
         val res = withdrawAll(name)
+        logger.info("[Bank] suspend withdrawAll(name='{}'): base call -> {}", name, res)
         if (res) script.awaitTicks(1)
+        logger.info("[Bank] suspend withdrawAll(name='{}'): end -> {}", name, res)
         return res
     }
 
+    
     suspend fun withdrawAll(script: SuspendableScript, id: Int): Boolean {
+        logger.info("[Bank] suspend withdrawAll(id={}): begin", id)
         val res = withdrawAll(id)
+        logger.info("[Bank] suspend withdrawAll(id={}): base call -> {}", id, res)
         if (res) script.awaitTicks(1)
+        logger.info("[Bank] suspend withdrawAll(id={}): end -> {}", id, res)
         return res
     }
 

@@ -1,4 +1,4 @@
-package com.uberith.api.game.world.internal
+package com.uberith.api.game.query.internal
 
 import net.botwithus.rs3.entities.SceneObject
 import net.botwithus.rs3.world.Distance

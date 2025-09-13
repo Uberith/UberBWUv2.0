@@ -1,49 +1,45 @@
-package com.uberith.api.game.world
+package com.uberith.api.game.query
 
+import com.uberith.api.game.query.base.Query
+import com.uberith.api.game.query.result.ResultSet
 import net.botwithus.rs3.cache.assets.so.SceneObjectDefinition
 import net.botwithus.rs3.entities.SceneObject
 import net.botwithus.rs3.world.World
-import net.botwithus.rs3.world.Distance
 import java.util.Arrays
+import java.util.function.BiFunction
+import java.util.function.Predicate
 import java.util.regex.Pattern
 
 /**
- * Kotlin query builder for RS3 SceneObjects, aligned with the XAPI Java variant.
- *
- * - Backed directly by `World.getSceneObjects()`.
- * - Chained filters (typeId, animation, hidden, multiType, name, option).
- * - `results()` materializes a list of matching `SceneObject`s.
+ * SceneObject query aligned with XAPI-style queries.
+ * - Backed by World.getSceneObjects()
+ * - Returns ResultSet<SceneObject> so extensions like ResultSet.nearest() work
  */
-class SceneObjectQuery : Iterable<SceneObject> {
+class SceneObjectQuery : Query<SceneObject> {
 
-    private var root: (SceneObject) -> Boolean = { true }
+    private var root: Predicate<SceneObject> = Predicate { true }
 
     companion object {
+        @JvmStatic
         fun newQuery(): SceneObjectQuery = SceneObjectQuery()
     }
 
-    /** Returns the filtered results as a List in the World iteration order. */
-    fun results(): List<SceneObject> =
-        World.getSceneObjects()
-            .asSequence()
-            .filter { so -> root(so) }
-            .toList()
+    override fun results(): ResultSet<SceneObject> {
+        val all = World.getSceneObjects()
+        val filtered = all.filter { so -> root.test(so) }
+        return ResultSet(filtered)
+    }
 
-    override fun iterator(): Iterator<SceneObject> = results().iterator()
+    override fun iterator(): MutableIterator<SceneObject> = results().iterator()
 
-    /** Tests whether a SceneObject matches the current predicate. */
-    fun test(sceneObject: SceneObject): Boolean = root(sceneObject)
-
-    /** Convenience: returns the nearest matching SceneObject, or null if none. */
-    fun nearest(): SceneObject? =
-        results().minByOrNull { so -> Distance.to(so) }
+    override fun test(sceneObject: SceneObject): Boolean = root.test(sceneObject)
 
     /** Filters by one or more type ids. No-op when empty. */
     fun typeId(vararg typeIds: Int): SceneObjectQuery {
         if (typeIds.isEmpty()) return this
         val set = typeIds.toSet()
         val prev = root
-        root = { t -> prev(t) && set.contains(t.typeId) }
+        root = Predicate { t -> prev.test(t) && set.contains(t.typeId) }
         return this
     }
 
@@ -52,14 +48,14 @@ class SceneObjectQuery : Iterable<SceneObject> {
         if (animations.isEmpty()) return this
         val set = animations.toSet()
         val prev = root
-        root = { t -> prev(t) && set.contains(t.animationId) }
+        root = Predicate { t -> prev.test(t) && set.contains(t.animationId) }
         return this
     }
 
-    /** Filters by hidden flag. Use `hidden(false)` for visible objects. */
+    /** Filters by hidden flag. Use hidden(false) for visible objects. */
     fun hidden(hidden: Boolean): SceneObjectQuery {
         val prev = root
-        root = { t -> prev(t) && t.isHidden == hidden }
+        root = Predicate { t -> prev.test(t) && t.isHidden == hidden }
         return this
     }
 
@@ -68,58 +64,58 @@ class SceneObjectQuery : Iterable<SceneObject> {
         if (sceneObjectDefinitions.isEmpty()) return this
         val defs = sceneObjectDefinitions.toSet()
         val prev = root
-        root = { t -> prev(t) && defs.contains(t.multiType) }
+        root = Predicate { t -> prev.test(t) && defs.contains(t.multiType) }
         return this
     }
 
     /** Filters by name using a custom predicate. No-op when empty. */
-    fun name(spred: (String, CharSequence) -> Boolean, vararg names: String): SceneObjectQuery {
+    fun name(spred: BiFunction<String, CharSequence, Boolean>, vararg names: String): SceneObjectQuery {
         if (names.isEmpty()) return this
         val prev = root
-        root = { t ->
+        root = Predicate { t ->
             val objName = t.name
-            prev(t) && objName != null && names.any { n -> spred(n, objName) }
+            prev.test(t) && objName != null && names.any { n -> spred.apply(n, objName) }
         }
         return this
     }
 
     /** Filters by exact name using String.contentEquals semantics. */
-    fun name(vararg names: String): SceneObjectQuery = name(String::contentEquals, *names)
+    fun name(vararg names: String): SceneObjectQuery = name(BiFunction { a, b -> a.contentEquals(b) }, *names)
 
     /** Filters by regex Patterns (full match). No-op when empty. */
     fun name(vararg patterns: Pattern): SceneObjectQuery {
         if (patterns.isEmpty()) return this
         val prev = root
-        root = { t ->
+        root = Predicate { t ->
             val objName = t.name
-            prev(t) && objName != null && Arrays.stream(patterns).anyMatch { p -> p.matcher(objName).matches() }
+            prev.test(t) && objName != null && Arrays.stream(patterns).anyMatch { p -> p.matcher(objName).matches() }
         }
         return this
     }
 
     /** Filters by options using a custom predicate. No-op when empty. */
-    fun option(spred: (String, CharSequence) -> Boolean, vararg options: String): SceneObjectQuery {
+    fun option(spred: BiFunction<String, CharSequence, Boolean>, vararg options: String): SceneObjectQuery {
         if (options.isEmpty()) return this
         val prev = root
-        root = { t ->
+        root = Predicate { t ->
             val objOptions = t.options
-            prev(t) && objOptions != null && objOptions.isNotEmpty() && options.any { i ->
-                objOptions.any { j -> j != null && spred(i, j as CharSequence) }
+            prev.test(t) && objOptions != null && objOptions.isNotEmpty() && options.any { i ->
+                objOptions.any { j -> j != null && spred.apply(i, j) }
             }
         }
         return this
     }
 
     /** Filters by options using String.contentEquals semantics. */
-    fun option(vararg option: String): SceneObjectQuery = option(String::contentEquals, *option)
+    fun option(vararg option: String): SceneObjectQuery = option(BiFunction { a, b -> a.contentEquals(b) }, *option)
 
     /** Filters by options using regex Patterns. No-op when empty. */
     fun option(vararg patterns: Pattern): SceneObjectQuery {
         if (patterns.isEmpty()) return this
         val prev = root
-        root = { t ->
+        root = Predicate { t ->
             val objOptions = t.options
-            prev(t) && objOptions != null && objOptions.any { opt ->
+            prev.test(t) && objOptions != null && objOptions.any { opt ->
                 opt != null && Arrays.stream(patterns).anyMatch { p -> p.matcher(opt).matches() }
             }
         }
