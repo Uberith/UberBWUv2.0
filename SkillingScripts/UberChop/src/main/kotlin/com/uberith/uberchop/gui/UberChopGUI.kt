@@ -135,7 +135,8 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             val worldText = tryGetWorldIdText()
             val pingText = tryGetPingMsText()
             val coordText = tryGetPlayerCoordsText()
-            ImGui.text("W: $worldText  |  Ping: $pingText ms  |  XYZ: $coordText")
+            val animText = tryGetAnimIdText()
+            ImGui.text("W: $worldText  |  Ping: $pingText ms  |  XYZ: $coordText  |  Anim: $animText")
             cm.popColors()
         }
         ImGui.end()
@@ -723,7 +724,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         val curLocIdx = locationNames.indexOf(curLocName).coerceAtLeast(0)
         ImGui.text("Location:")
         ImGui.sameLine(0f, 6f)
-        val shownLoc = if (locationNames.isNotEmpty()) locationNames.getOrElse(curLocIdx) { locationNames.first() } else "—"
+        val shownLoc = if (locationNames.isNotEmpty()) locationNames.getOrElse(curLocIdx) { locationNames.first() } else "-"
         if (ImGui.beginCombo("##locationCombo", shownLoc, 0)) {
             for (i in locationNames.indices) {
                 val isSelected = (i == curLocIdx)
@@ -1114,5 +1115,16 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                 if (x != null && y != null && z != null) "$x, $y, $z" else "—"
             } catch (_: Throwable) { "—" }
         }
+    }
+
+    private fun tryGetAnimIdText(): String {
+        return try {
+            val cls = Class.forName("net.botwithus.rs3.entities.LocalPlayer")
+            val mSelf = cls.getMethod("self")
+            val player = mSelf.invoke(null) ?: return "-"
+            val mAnim = player.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.lowercase().contains("animation") }
+            val id = (mAnim?.invoke(player) as? Number)?.toInt()
+            id?.toString() ?: "-"
+        } catch (_: Throwable) { "-" }
     }
 }

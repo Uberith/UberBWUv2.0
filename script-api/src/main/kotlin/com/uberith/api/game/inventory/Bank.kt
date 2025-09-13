@@ -1,4 +1,4 @@
-package com.uberith.api.game.inventories
+package com.uberith.api.game.inventory
 
 import com.uberith.api.SuspendableScript
 import net.botwithus.rs3.interfaces.Component
@@ -17,7 +17,6 @@ import net.botwithus.xapi.query.NpcQuery
 import net.botwithus.xapi.query.SceneObjectQuery
 import net.botwithus.xapi.query.result.ResultSet
 import net.botwithus.xapi.script.permissive.base.PermissiveScript
-import net.botwithus.xapi.game.inventory.Backpack
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import java.util.*
@@ -103,8 +102,29 @@ object Bank {
         }
     }
 
-    fun isOpen(): Boolean = ComponentQuery.newQuery(INTERFACE_INDEX).results().size() > 0
+    fun isOpen(): Boolean {
+        // Prefer the official Interfaces.isOpen via reflection (avoids hard compile dependency)
+        try {
+            val cls = Class.forName("net.botwithus.rs3.interfaces.Interfaces")
+            val m = cls.getMethod("isOpen", Int::class.javaPrimitiveType)
+            val open = (m.invoke(null, INTERFACE_INDEX) as? Boolean) ?: false
+            logger.debug("[Bank] isOpen via Interfaces.isOpen({}) -> {}", INTERFACE_INDEX, open)
+            return open
+        } catch (t: Throwable) {
+            logger.debug("[Bank] Interfaces.isOpen reflection failed: {}", t.message)
+        }
 
+        // Fallback: presence of a known bank component under interface 517
+        return try {
+            val comp = ComponentQuery.newQuery(INTERFACE_INDEX).id(COMPONENT_INDEX).results().first()
+            val open = comp != null
+            logger.debug("[Bank] isOpen via component probe (iface={}, compId={}) -> {}", INTERFACE_INDEX, COMPONENT_INDEX, open)
+            open
+        } catch (t: Throwable) {
+            logger.debug("[Bank] isOpen component probe failed: {}", t.message)
+            false
+        }
+    }
     fun close(): Boolean = MiniMenu.doAction(Action.COMPONENT, 1, -1, 33882430) > 0
 
     fun getInventory(): Inventory? = InventoryManager.getInventory(INVENTORY_ID)
@@ -255,6 +275,97 @@ object Bank {
             .toList().contains(false)
     }
 
+    // Empty-Box helpers (e.g., "Empty - logs and bird's nests") within the Bank interface
+    fun emptyBox(option: String): Boolean {
+        if (!isOpen()) {
+            logger.info("[Bank] emptyBox(option='{}'): bank not open", option)
+            return false
+        }
+        val comp = ComponentQuery.newQuery(INTERFACE_INDEX).option(option).results().first()
+        val ok = comp != null && (comp.interact(1) > 0 || comp.interact(option) > 0)
+        logger.info(
+            "[Bank] emptyBox(option='{}'): component {} -> {}",
+            option,
+            if (comp != null) "found" else "not-found",
+            ok
+        )
+        return ok
+    }
+
+    fun emptyBox(script: PermissiveScript, option: String): Boolean {
+        val ok = emptyBox(option)
+        if (ok) script.delay(Rand.nextInt(1, 2))
+        return ok
+    }
+
+    suspend fun emptyBox(script: SuspendableScript, option: String): Boolean {
+        val ok = emptyBox(option)
+        if (ok) script.awaitTicks(2)
+        return ok
+    }
+
+    // Overloads that specify the box name and fall back to backpack interaction when needed
+    fun emptyBox(boxName: String, option: String): Boolean {
+        if (!isOpen()) {
+            logger.info("[Bank] emptyBox(name='{}', option='{}'): bank not open", boxName, option)
+            return false
+        }
+        try {
+            // 1) Target the specific item-id component inside the bank interface (most reliable)
+            val bpItem = Backpack.getItem({ n, h -> h.toString().contains(n, true) }, boxName)
+            logger.info(
+                "[Bank] emptyBox(name='{}', option='{}'): backpack item -> {}",
+                boxName,
+                option,
+                bpItem?.let { "${it.name} (${it.id})" } ?: "null"
+            )
+            if (bpItem != null) {
+                val comp = ComponentQuery.newQuery(INTERFACE_INDEX).id(COMPONENT_INDEX).itemId(bpItem.id).results().first()
+                logger.debug(
+                    "[Bank] emptyBox(name='{}'): bank component by itemId {}",
+                    boxName,
+                    if (comp != null) "found" else "not-found"
+                )
+                if (comp != null) {
+                    val ok = comp.interact(1) > 0 || comp.interact(option) > 0
+                    logger.info("[Bank] emptyBox(name='{}'): interact component by id -> {}", boxName, ok)
+                    if (ok) return true
+                }
+            }
+            // 2) Try any component with the given option under the bank interface
+            val anyComp = ComponentQuery.newQuery(INTERFACE_INDEX).option(option).results().first()
+            logger.debug(
+                "[Bank] emptyBox(name='{}'): bank component by option '{}' {}",
+                boxName,
+                option,
+                if (anyComp != null) "found" else "not-found"
+            )
+            if (anyComp != null && (anyComp.interact(1) > 0 || anyComp.interact(option) > 0)) {
+                logger.info("[Bank] emptyBox(name='{}'): interact component by option -> true", boxName)
+                return true
+            }
+            // 3) Last-resort: interact with the backpack item directly using the provided option
+            val ok = if (bpItem != null) Backpack.interact(bpItem, option) else false
+            logger.info("[Bank] emptyBox(name='{}'): fallback backpack interact -> {}", boxName, ok)
+            return ok
+        } catch (t: Throwable) {
+            logger.warn("[Bank] emptyBox(name='{}') exception: {}", boxName, t.message)
+            return false
+        }
+    }
+
+    fun emptyBox(script: PermissiveScript, boxName: String, option: String): Boolean {
+        val ok = emptyBox(boxName, option)
+        if (ok) script.delay(Rand.nextInt(1, 2))
+        return ok
+    }
+
+    suspend fun emptyBox(script: SuspendableScript, boxName: String, option: String): Boolean {
+        val ok = emptyBox(boxName, option)
+        if (ok) script.awaitTicks(2)
+        return ok
+    }
+
     fun depositAllExcept(script: PermissiveScript, vararg itemNames: String): Boolean {
         val keepNames = HashSet(listOf(*itemNames))
         val keepIds = Backpack.getItems().stream()
@@ -356,6 +467,100 @@ object Bank {
         return res
     }
 
+    /** Suspendable variant: deposit a single component by option. */
+    suspend fun deposit(script: SuspendableScript, comp: Component?, option: Int): Boolean {
+        setTransferOption(TransferOptionType.ALL)
+        val ok = comp != null && comp.interact(option) > 0
+        if (ok) script.awaitTicks(1)
+        return ok
+    }
+
+    /** Suspendable variant: deposit by a component query using option 1 (Deposit-All/Deposit-1). */
+    suspend fun depositAll(script: SuspendableScript, query: ComponentQuery): Boolean {
+        val item = query.results().first()
+        return deposit(script, item, 1)
+    }
+
+    /** Suspendable variant: deposit by name(s). */
+    suspend fun depositAll(script: SuspendableScript, vararg itemNames: String): Boolean {
+        val ids = InventoryItemQuery.newQuery(93).name(*itemNames).results().stream()
+            .map { it.id }.distinct().toList()
+        for (id in ids) {
+            if (!depositAll(script, ComponentQuery.newQuery(517).itemId(id))) return false
+        }
+        return ids.isNotEmpty()
+    }
+
+    /** Suspendable variant: deposit by id(s). */
+    suspend fun depositAll(script: SuspendableScript, vararg itemIds: Int): Boolean {
+        val ids = InventoryItemQuery.newQuery(93).id(*itemIds).results().stream()
+            .map { it.id }.distinct().toList()
+        for (id in ids) {
+            if (!depositAll(script, ComponentQuery.newQuery(517).itemId(id))) return false
+        }
+        return ids.isNotEmpty()
+    }
+
+    /** Suspendable variant: deposit by regex pattern(s). */
+    suspend fun depositAll(script: SuspendableScript, vararg patterns: Pattern): Boolean {
+        val ids = InventoryItemQuery.newQuery(93).name(*patterns).results().stream()
+            .map { it.id }.distinct().toList()
+        for (id in ids) {
+            if (!depositAll(script, ComponentQuery.newQuery(517).itemId(id))) return false
+        }
+        return ids.isNotEmpty()
+    }
+
+    /**
+     * Suspendable variant: deposit everything except matching names.
+     * Selects all bank component entries that support Deposit-All/Deposit-1 and are not in the keep-set.
+     */
+    suspend fun depositAllExcept(script: SuspendableScript, vararg itemNames: String): Boolean {
+        val keepNames = HashSet(listOf(*itemNames))
+        val keepIds = Backpack.getItems().stream()
+            .filter { it.name != null && keepNames.contains(it.name) }
+            .map(Item::getId)
+            .collect(Collectors.toSet())
+
+        val itemIds = ComponentQuery.newQuery(517).results().stream()
+            .filter { i -> !keepIds.contains(i.itemId) && (i.options.contains("Deposit-All") || i.options.contains("Deposit-1")) }
+            .map(Component::getItemId)
+            .collect(Collectors.toSet())
+
+        for (id in itemIds) {
+            if (!depositAll(script, ComponentQuery.newQuery(517).itemId(id))) return false
+        }
+        return itemIds.isNotEmpty()
+    }
+
+    /** Suspendable variant: deposit everything except ids. */
+    suspend fun depositAllExcept(script: SuspendableScript, vararg ids: Int): Boolean {
+        val idSet = Arrays.stream(ids).boxed().collect(Collectors.toSet())
+        val itemIds = ComponentQuery.newQuery(517).results().stream()
+            .filter { i -> !idSet.contains(i.itemId) && (i.options.contains("Deposit-All") || i.options.contains("Deposit-1")) }
+            .map(Component::getItemId)
+            .collect(Collectors.toSet())
+        for (id in itemIds) {
+            if (!depositAll(script, ComponentQuery.newQuery(517).itemId(id))) return false
+        }
+        return itemIds.isNotEmpty()
+    }
+
+    /** Suspendable variant: deposit everything except regex patterns. */
+    suspend fun depositAllExcept(script: SuspendableScript, vararg patterns: Pattern): Boolean {
+        val idMap = Backpack.getItems().stream()
+            .filter { i: Item -> i.name != null && Arrays.stream(patterns).anyMatch { p: Pattern -> p.matcher(i.name).matches() } }
+            .collect(Collectors.toMap(Item::getId, Item::getName))
+        val itemIds = ComponentQuery.newQuery(517).results().stream()
+            .filter { i -> !idMap.containsKey(i.itemId) && (i.options.contains("Deposit-All") || i.options.contains("Deposit-1")) }
+            .map(Component::getItemId)
+            .collect(Collectors.toSet())
+        for (id in itemIds) {
+            if (!depositAll(script, ComponentQuery.newQuery(517).itemId(id))) return false
+        }
+        return itemIds.isNotEmpty()
+    }
+
     suspend fun depositEquipment(script: SuspendableScript): Boolean {
         val res = depositEquipment()
         if (res) script.awaitTicks(1)
@@ -379,6 +584,7 @@ object Bank {
         if (res) script.awaitTicks(1)
         return res
     }
+
 }
 
 enum class TransferOptionType(val varbitStateValue: Int) {

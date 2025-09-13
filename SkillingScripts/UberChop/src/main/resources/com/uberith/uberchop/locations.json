@@ -1,0 +1,157 @@
+{
+  "locations": [
+    {
+      "name": "Anywhere",
+      "availableTrees": ["Tree", "Oak", "Willow", "Maple", "Yew", "Magic", "Elder", "Acadia", "Teak", "Mahogany", "Ivy", "Arctic pine", "Eucalyptus", "Crystal", "Bamboo"],
+      "chop": null,
+      "bank": null
+    },
+    {
+      "name": "Prifddinas Ithell Elders",
+      "availableTrees": ["Elder"],
+      "chop": { "x": 2228, "y": 3389, "z": 0 },
+      "bank": { "x": 2235, "y": 3370, "z": 0 },
+      "note": "Verify in-game; adjust via GUI if needed"
+    },
+    {
+      "name": "Prifddinas Iorwerth Elders",
+      "availableTrees": ["Elder"],
+      "chop": { "x": 2206, "y": 3362, "z": 0 },
+      "bank": { "x": 2199, "y": 3369, "z": 0 },
+      "note": "Verify in-game; adjust via GUI if needed"
+    },
+    {
+      "name": "Prifddinas Crystal Tree",
+      "availableTrees": ["Crystal"],
+      "chop": { "x": 2225, "y": 3372, "z": 0 },
+      "bank": { "x": 2235, "y": 3370, "z": 0 },
+      "note": "Crystal tree spawns; verify active node"
+    },
+    {
+      "name": "Prifddinas Max Guild Magics",
+      "availableTrees": ["Magic", "Yew"],
+      "chop": { "x": 2214, "y": 3357, "z": 0 },
+      "bank": { "x": 2207, "y": 3369, "z": 1 },
+      "note": "Requires Max Guild access"
+    },
+    {
+      "name": "Menaphos Port Acadia",
+      "availableTrees": ["Acadia"],
+      "chop": { "x": 3205, "y": 2818, "z": 0 },
+      "bank": { "x": 3208, "y": 2802, "z": 0 },
+      "note": "Near port district bank chest"
+    },
+    {
+      "name": "Menaphos Merchant Acadia",
+      "availableTrees": ["Acadia"],
+      "chop": { "x": 3178, "y": 2834, "z": 0 },
+      "bank": { "x": 3174, "y": 2842, "z": 0 },
+      "note": "Near merchant district"
+    },
+    {
+      "name": "Varrock Palace Ivy (AFK)",
+      "availableTrees": ["Ivy"],
+      "chop": { "x": 3215, "y": 3462, "z": 0 },
+      "bank": { "x": 3253, "y": 3420, "z": 0 },
+      "note": "Ivy on palace walls; longer AFK cycles"
+    },
+    {
+      "name": "Ardougne Ivy (AFK)",
+      "availableTrees": ["Ivy"],
+      "chop": { "x": 2602, "y": 3294, "z": 0 },
+      "bank": { "x": 2615, "y": 3332, "z": 0 },
+      "note": "Ivy on north wall; verify bank proximity"
+    },
+    {
+      "name": "Burthorpe Trees",
+      "availableTrees": ["Tree", "Oak", "Willow"],
+      "chop": { "x": 2891, "y": 3546, "z": 0 },
+      "bank": { "x": 2889, "y": 3537, "z": 0 },
+      "note": "Starter area trees near lodestone"
+    },
+    {
+      "name": "Burthorpe Yews",
+      "availableTrees": ["Yew"],
+      "chop": { "x": 2919, "y": 3548, "z": 0 },
+      "bank": { "x": 2889, "y": 3537, "z": 0 }
+    },
+    {
+      "name": "Lumbridge",
+      "availableTrees": ["Tree", "Oak", "Willow"],
+      "chop": { "x": 3202, "y": 3231, "z": 0 },
+      "bank": { "x": 3209, "y": 3219, "z": 2 }
+    },
+    {
+      "name": "Varrock West",
+      "availableTrees": ["Tree", "Oak", "Ivy"],
+      "chop": { "x": 3169, "y": 3421, "z": 0 },
+      "bank": { "x": 3185, "y": 3436, "z": 0 }
+    },
+    {
+      "name": "Varrock East",
+      "availableTrees": ["Tree", "Oak", "Ivy"],
+      "chop": { "x": 3291, "y": 3426, "z": 0 },
+      "bank": { "x": 3253, "y": 3420, "z": 0 }
+    },
+    {
+      "name": "Draynor Willows",
+      "availableTrees": ["Willow"],
+      "chop": { "x": 3085, "y": 3238, "z": 0 },
+      "bank": { "x": 3093, "y": 3245, "z": 0 }
+    },
+    {
+      "name": "Edgeville Yews",
+      "availableTrees": ["Yew"],
+      "chop": { "x": 3088, "y": 3478, "z": 0 },
+      "bank": { "x": 3093, "y": 3491, "z": 0 }
+    },
+    {
+      "name": "Seers' Village",
+      "availableTrees": ["Maple", "Magic", "Yew"],
+      "chop": { "x": 2725, "y": 3491, "z": 0 },
+      "bank": { "x": 2723, "y": 3493, "z": 0 }
+    },
+    {
+      "name": "Prifddinas",
+      "availableTrees": ["Magic", "Yew", "Elder", "Crystal"],
+      "chop": null,
+      "bank": null
+    },
+    {
+      "name": "Anachronia (Bamboo)",
+      "availableTrees": ["Bamboo"],
+      "chop": { "x": 5477, "y": 2333, "z": 0 },
+      "bank": null
+    },
+    {
+      "name": "Karamja (Teak/Mahogany)",
+      "availableTrees": ["Teak", "Mahogany"],
+      "chop": { "x": 2795, "y": 3086, "z": 0 },
+      "bank": null
+    },
+    {
+      "name": "Falador Yews (South)",
+      "availableTrees": ["Yew"],
+      "chop": { "x": 3059, "y": 3311, "z": 0 },
+      "bank": { "x": 3013, "y": 3355, "z": 0 }
+    },
+    {
+      "name": "Seers' Magics (Tower)",
+      "availableTrees": ["Magic"],
+      "chop": { "x": 2706, "y": 3405, "z": 0 },
+      "bank": { "x": 2723, "y": 3493, "z": 0 }
+    },
+    {
+      "name": "Catherby Maples",
+      "availableTrees": ["Maple"],
+      "chop": { "x": 2780, "y": 3433, "z": 0 },
+      "bank": { "x": 2809, "y": 3440, "z": 0 }
+    },
+    {
+      "name": "Gnome Stronghold Yews",
+      "availableTrees": ["Yew"],
+      "chop": { "x": 2448, "y": 3423, "z": 0 },
+      "bank": { "x": 2449, "y": 3426, "z": 0 }
+    }
+  ]
+}

@@ -6,10 +6,10 @@ module UberChop {
     requires BotWithUs.navigation.api;
     requires org.slf4j;
     requires static xapi;
-    requires com.google.gson;
     requires static java.desktop;
 
-    opens com.uberith.uberchop to BotWithUs.api; // needed for event annotations
+    // Keep open to BotWithUs.api for event annotations
+    opens com.uberith.uberchop to BotWithUs.api;
     // Declare service provider so ServiceLoader can discover this script on the module path
     provides net.botwithus.scripts.Script with com.uberith.uberchop.UberChop;
 }
