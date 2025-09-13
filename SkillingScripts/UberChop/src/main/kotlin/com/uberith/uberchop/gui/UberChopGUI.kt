@@ -734,10 +734,57 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         }
 
         ImGui.separator()
-        // Option to use/withdraw a Wood Box during banking
-        var wb = script.settings.withdrawWoodBox
-        wb = ImGui.checkbox("Withdrawal Wood Box", wb)
-        script.settings.withdrawWoodBox = wb
+        // Requirements (single section on Overview)
+        ImGui.text("Requirements")
+        val treeType = resolveTreeType(script.targetTree)
+        val reqLevel = treeType?.levelReq
+        ImGui.text("Recommended WC Level: ${reqLevel ?: "—"}")
+        // Show user's WC level, colored green if >= recommended, else red
+        val userWc = UberChop().WCLevel
+        ImGui.text("Your WC Level:")
+        ImGui.sameLine(0f, 6f)
+        when {
+            userWc == null -> {
+                ImGui.pushStyleColor(ColorManager.ColorType.Text.index, 0.8f, 0.8f, 0.8f, 1f)
+                ImGui.text("N/A")
+                ImGui.popStyleColor(1)
+            }
+            reqLevel == null -> {
+                ImGui.text(userWc.toString())
+            }
+            userWc >= reqLevel -> {
+                ImGui.pushStyleColor(ColorManager.ColorType.Text.index, 0.35f, 0.84f, 0.49f, 1f) // green
+                ImGui.text(userWc.toString())
+                ImGui.popStyleColor(1)
+            }
+            else -> {
+                ImGui.pushStyleColor(ColorManager.ColorType.Text.index, 0.94f, 0.36f, 0.36f, 1f) // red
+                ImGui.text(userWc.toString())
+                ImGui.popStyleColor(1)
+            }
+        }
+
+        // Configured tiles checks
+        run {
+            val curLoc = script.location
+            // Chop
+            val effChop = try {
+                val sel = script.treeLocations.firstOrNull { it.name == curLoc }
+                val o = script.settings.customLocations[curLoc]
+                if (o?.chopX != null && o.chopY != null && o.chopZ != null) net.botwithus.rs3.world.Coordinate(o.chopX!!, o.chopY!!, o.chopZ!!) else sel?.chop
+            } catch (_: Throwable) { null }
+            drawStatusLine("Configured chop tile?", effChop != null)
+
+            // Bank
+            val effBank = try {
+                val sel = script.treeLocations.firstOrNull { it.name == curLoc }
+                val o = script.settings.customLocations[curLoc]
+                if (o?.bankX != null && o.bankY != null && o.bankZ != null) net.botwithus.rs3.world.Coordinate(o.bankX!!, o.bankY!!, o.bankZ!!) else sel?.bank
+            } catch (_: Throwable) { null }
+            drawStatusLine("Configured bank tile?", effBank != null)
+        }
+
+        // No Inventory Hints or Bank/Chop sections on Overview per request
     }
 
     private fun drawCore() {
@@ -753,6 +800,68 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         script.settings.useCrystallise = b
         b = ImGui.checkbox("Use Juju Potions", script.settings.useJujuPotions)
         script.settings.useJujuPotions = b
+        b = ImGui.checkbox("Withdraw Wood Box", script.settings.withdrawWoodBox)
+        script.settings.withdrawWoodBox = b
+    }
+
+    // --- Helpers for Overview readiness ---
+    private fun drawStatusLine(label: String, ok: Boolean, unknown: Boolean = false) {
+        ImGui.text(label)
+        ImGui.sameLine(0f, 8f)
+        if (unknown) {
+            // Gray/unknown state
+            ImGui.pushStyleColor(ColorManager.ColorType.Text.index, 0.8f, 0.8f, 0.8f, 1f)
+            ImGui.text("Unknown")
+            ImGui.popStyleColor(1)
+            return
+        }
+        if (ok) {
+            ImGui.pushStyleColor(ColorManager.ColorType.Text.index, 0.35f, 0.84f, 0.49f, 1f) // green
+            ImGui.text("OK")
+        } else {
+            ImGui.pushStyleColor(ColorManager.ColorType.Text.index, 0.94f, 0.36f, 0.36f, 1f) // red
+            ImGui.text("Missing")
+        }
+        ImGui.popStyleColor(1)
+    }
+
+    private fun resolveTreeType(name: String): com.uberith.api.game.skills.woodcutting.TreeType? {
+        val values = com.uberith.api.game.skills.woodcutting.TreeType.values()
+        val norm = name.trim().lowercase()
+        // Prefer exact match on displayName or its short form without trailing " tree"
+        val exact = values.firstOrNull { t ->
+            val disp = t.displayName.trim().lowercase()
+            val short = disp.removeSuffix(" tree")
+            norm.equals(disp, true) || norm.equals(short, true)
+        }
+        if (exact != null) return exact
+        // Fallback: lenient contains match
+        return values.firstOrNull { t ->
+            val disp = t.displayName.trim().lowercase()
+            disp.contains(norm) || norm.contains(disp)
+        }
+    }
+
+    private fun hasBackpackItemRegex(pattern: String): Boolean {
+        return try {
+            val cls = Class.forName("com.uberith.api.game.inventory.Backpack")
+            val pat = java.util.regex.Pattern.compile(pattern, java.util.regex.Pattern.CASE_INSENSITIVE)
+            val m = cls.getMethod("contains", java.util.regex.Pattern::class.java)
+            (m.invoke(null, pat) as? Boolean) == true
+        } catch (_: Throwable) { false }
+    }
+
+    private fun hasBankItemRegex(pattern: String): Boolean {
+        return try {
+            val cls = Class.forName("com.uberith.api.game.inventory.Bank")
+            val pat = java.util.regex.Pattern.compile(pattern, java.util.regex.Pattern.CASE_INSENSITIVE)
+            val m = cls.methods.firstOrNull { it.name == "contains" && it.parameterTypes.size == 1 && it.parameterTypes[0] == java.util.regex.Pattern::class.java }
+            if (m != null) {
+                (m.invoke(null, pat) as? Boolean) == true
+            } else {
+                false
+            }
+        } catch (_: Throwable) { false }
     }
 
     private fun drawHandlers() {

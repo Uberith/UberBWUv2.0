@@ -9,6 +9,7 @@ import java.util.regex.Pattern
  * - displayName: Human‑friendly name as used in UI/logging.
  * - logName: The resulting log name for inventory/bank interactions.
  * - namePattern: Case‑insensitive regex used to match scene object names.
+ * - typeIds: Scene object type ids for the choppable variants (optional).
  * - excludedIds: Specific scene object ids to ignore (e.g., unchoppable variants).
  * - levelReq: Minimum Woodcutting level typically required.
  * - membersOnly: Whether the tree is restricted to members worlds.
@@ -21,6 +22,8 @@ enum class TreeType(
     val displayName: String,
     val logName: String,
     val namePattern: Pattern,
+    /** Known choppable scene object ids for this tree (optional) */
+    val typeIds: Set<Int> = emptySet(),
     val excludedIds: Set<Int> = emptySet(),
     val levelReq: Int,
     val membersOnly: Boolean = false
@@ -30,6 +33,7 @@ enum class TreeType(
         displayName = "Tree",
         logName = "Logs",
         namePattern = Pattern.compile("^Tree$", Pattern.CASE_INSENSITIVE),
+        typeIds = setOf(38788),
         levelReq = 1,
         membersOnly = false
     ),
@@ -37,6 +41,7 @@ enum class TreeType(
         displayName = "Oak",
         logName = "Oak logs",
         namePattern = Pattern.compile("^Oak$", Pattern.CASE_INSENSITIVE),
+        typeIds = setOf(38371),
         levelReq = 10,
         membersOnly = false
     ),

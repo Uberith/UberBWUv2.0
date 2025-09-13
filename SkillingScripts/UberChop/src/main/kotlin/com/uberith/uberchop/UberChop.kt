@@ -8,6 +8,7 @@ import com.uberith.api.game.world.Coordinates
 import com.uberith.api.game.world.Traverse
 import com.uberith.uberchop.gui.UberChopGUI
 import net.botwithus.rs3.entities.LocalPlayer
+import net.botwithus.rs3.stats.Stats
 import net.botwithus.rs3.world.Coordinate
 import net.botwithus.scripts.Info
 import net.botwithus.ui.workspace.Workspace
@@ -35,6 +36,7 @@ class UberChop : SuspendableScript() {
     private val logger: Logger = LoggerFactory.getLogger(this.javaClass)
     private var totalRuntimeMs: Long = 0L
     private var lastRuntimeUpdateMs: Long = 0L
+    var WCLevel = Stats.WOODCUTTING.currentLevel
 
     
 
@@ -73,6 +75,7 @@ class UberChop : SuspendableScript() {
         lastRuntimeUpdateMs = now
         // sync cached flags from settings to reflect GUI changes
         withdrawWoodBox = settings.withdrawWoodBox
+        WCLevel = Stats.WOODCUTTING.currentLevel
 
         when (phase) {
             Phase.READY -> {
@@ -96,6 +99,11 @@ class UberChop : SuspendableScript() {
                 val prepBank = effectiveBankCoordinate()
                 logger.info("Preparing: chopTile={}, bankTile={}", prepChop ?: "none", prepBank ?: "none")
                 logger.info("Phase: PREPARING -> CHOPPING")
+                if (!withdrawWoodBox) {
+                    phase = Phase.CHOPPING
+                    return
+                }
+
                 // Wait to be idle only if currently animating, and handle null player safely
                 val currentAnim = LocalPlayer.self()?.animationId ?: -1
                 if (currentAnim != -1) {
@@ -168,13 +176,11 @@ class UberChop : SuspendableScript() {
                 if (!Backpack.isFull()) {
                     phase = Phase.CHOPPING
                 } else {
-                    if (withdrawWoodBox) {
-                        val woodBox = Backpack.getItem({ n, h -> h.toString().contains(n, true) }, "wood box")
-                        if (woodBox != null && Bank.isOpen()) {
-                            logger.info("Emptying wood box via bank option or backpack fallback")
-                            Bank.emptyBox(this, woodBox.name, "Empty - logs and bird's nests")
-                            awaitTicks(1)
-                        }
+                    val woodBox = Backpack.getItem({ n, h -> h.toString().contains(n, true) }, "wood box")
+                    if (woodBox != null && Bank.isOpen()) {
+                        logger.info("Emptying wood box via bank option or backpack fallback")
+                        Bank.emptyBox(this, woodBox.name, "Empty - logs and bird's nests")
+                        awaitTicks(1)
                     }
                     val logsPat = java.util.regex.Pattern.compile(".*logs.*", java.util.regex.Pattern.CASE_INSENSITIVE)
                     logger.info("Depositing logs $logsPat")
@@ -185,16 +191,11 @@ class UberChop : SuspendableScript() {
             }
             Phase.CHOPPING -> {
                 if (Backpack.isFull()) {
-                    if (withdrawWoodBox) {
-                        val woodBox = Backpack.getItem({ n, h -> h.toString().contains(n, true) }, "wood box")
-                        if (woodBox != null) {
-                            woodBox.let { Backpack.interact(it, "Fill") }
-                            awaitTicks(1)
-                            if (Backpack.isFull()) {
-                                phase = Phase.BANKING
-                                return
-                            }
-                        } else {
+                    val woodBox = Backpack.getItem({ n, h -> h.toString().contains(n, true) }, "wood box")
+                    if (woodBox != null) {
+                        woodBox.let { Backpack.interact(it, "Fill") }
+                        awaitTicks(1)
+                        if (Backpack.isFull()) {
                             phase = Phase.BANKING
                             return
                         }
