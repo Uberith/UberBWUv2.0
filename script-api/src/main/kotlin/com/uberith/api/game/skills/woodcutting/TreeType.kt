@@ -109,5 +109,40 @@ enum class TreeType(
         namePattern = Pattern.compile("^Eternal magic tree$", Pattern.CASE_INSENSITIVE),
         levelReq = 100,
         membersOnly = true
+    ),
+    IVY(
+        displayName = "Ivy",
+        logName = "Ivy",
+        namePattern = Pattern.compile("^Ivy$", Pattern.CASE_INSENSITIVE),
+        levelReq = 68,
+        membersOnly = false
+    ),
+    ARCTIC_PINE(
+        displayName = "Arctic Pine",
+        logName = "Arctic pine logs",
+        namePattern = Pattern.compile("^Arctic Pine$", Pattern.CASE_INSENSITIVE),
+        levelReq = 54,
+        membersOnly = true
+    ),
+    EUCALYPTUS(
+        displayName = "Eucalyptus tree",
+        logName = "Eucalyptus logs",
+        namePattern = Pattern.compile("^Eucalyptus tree$", Pattern.CASE_INSENSITIVE),
+        levelReq = 58,
+        membersOnly = true
+    ),
+    CRYSTAL(
+        displayName = "Crystal tree",
+        logName = "Crystal tree blossom",
+        namePattern = Pattern.compile("^Crystal tree$", Pattern.CASE_INSENSITIVE),
+        levelReq = 94,
+        membersOnly = true
+    ),
+    BAMBOO(
+        displayName = "Bamboo",
+        logName = "Bamboo",
+        namePattern = Pattern.compile("^Bamboo$", Pattern.CASE_INSENSITIVE),
+        levelReq = 90,
+        membersOnly = true
     );
 }

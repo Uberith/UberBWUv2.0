@@ -56,8 +56,8 @@ object Trees {
 
     private val logger: org.slf4j.Logger = org.slf4j.LoggerFactory.getLogger(Trees::class.java)
 
-    // Common preferred interaction actions for trees
-    private val preferredActions = listOf("Chop down", "Cut down")
+    // Common preferred interaction actions for trees (include Ivy's "Chop")
+    private val preferredActions = listOf("Chop down", "Cut down", "Chop")
 
     private fun chooseAction(options: List<String?>): String =
         options.firstOrNull { it != null && preferredActions.any { p -> p.equals(it, ignoreCase = true) } }

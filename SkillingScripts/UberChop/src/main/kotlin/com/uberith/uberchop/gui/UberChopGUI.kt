@@ -10,6 +10,7 @@ import javax.imageio.ImageIO
 import com.uberith.api.ui.ColorManager
 import com.uberith.api.ui.CustomImages
 import net.botwithus.rs3.entities.LocalPlayer
+import net.botwithus.rs3.world.ClientState
 
 class UberChopGUI(private val script: UberChop) : BuildableUI {
     // 0 Overview, 1 Core, 2 Handlers, 3 WorldHop, 4 Advanced, 5 Statistics, 6 Support, 7 Debug
@@ -84,10 +85,9 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             }
             ImGui.separator()
             if (minimized) {
-                val worldText = tryGetWorldIdText()
-                val pingText = tryGetPingMsText()
+                val worldText = ClientState.GAME.id.toString()
                 val coordText = LocalPlayer.self().coordinate
-                ImGui.text("W: $worldText  |  Ping: $pingText ms  |  XYZ: $coordText")
+                ImGui.text("W: $worldText  |  XYZ: $coordText")
                 cm.popColors()
                 ImGui.end()
                 return
@@ -144,10 +144,9 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
 
             // Bottom status bar
             ImGui.separator()
-            val worldText = tryGetWorldIdText()
-            val pingText = tryGetPingMsText()
+            val worldText = ClientState.GAME.id.toString()
             val coordText = LocalPlayer.self().coordinate
-            ImGui.text("W: $worldText  |  Ping: $pingText ms  |  XYZ: $coordText  |  Anim: ${LocalPlayer.self().animationId}")
+            ImGui.text("W: $worldText  |  XYZ: $coordText  |  Anim: ${LocalPlayer.self().animationId}")
             cm.popColors()
         }
         ImGui.end()
@@ -700,13 +699,29 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         val allTrees = com.uberith.uberchop.TreeTypes.ALL
         val currentIdx = script.settings.savedTreeType.coerceIn(0, allTrees.size - 1)
         val currentName = allTrees[currentIdx]
+        // Build (index, name, level?) triples
+        data class TreeEntry(val idx: Int, val name: String, val level: Int?)
+        fun levelFor(name: String): Int? =
+            try {
+                resolveTreeType(name)?.levelReq
+            } catch (_: Throwable) { null }
+        val entries = allTrees.mapIndexed { i, n -> TreeEntry(i, n, levelFor(n)) }
+        // Sort by level when available; unknown levels follow in original order
+        val known = entries.filter { it.level != null }.sortedBy { it.level!! }
+        val unknown = entries.filter { it.level == null }
+        val sorted = known + unknown
+        // Label helper: "[lvl] Name" when level known
+        fun labelFor(e: TreeEntry): String = e.level?.let { "[${it}] ${e.name}" } ?: e.name
+        // Show current label with level when available
+        val currentLabel = labelFor(TreeEntry(currentIdx, currentName, levelFor(currentName)))
         var treeChanged = false
-        if (ImGui.beginCombo("##targetTreeCombo", currentName, 0)) {
-            for (i in allTrees.indices) {
-                val isSelected = (i == currentIdx)
-                if (ImGui.selectable(allTrees[i], isSelected, 0, 0f, 0f)) {
-                    script.settings.savedTreeType = i
-                    script.targetTree = allTrees[i]
+        if (ImGui.beginCombo("##targetTreeCombo", currentLabel, 0)) {
+            for (e in sorted) {
+                val isSelected = (e.idx == currentIdx)
+                val lbl = labelFor(e)
+                if (ImGui.selectable(lbl, isSelected, 0, 0f, 0f)) {
+                    script.settings.savedTreeType = e.idx
+                    script.targetTree = e.name
                     treeChanged = true
                 }
             }
@@ -1261,49 +1276,5 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             val all = java.nio.file.Files.readAllLines(path)
             if (all.size <= maxLines) all else all.takeLast(maxLines)
         } catch (_: Throwable) { emptyList() }
-    }
-
-    private fun tryGetWorldIdText(): String {
-        return try {
-            // Prefer LoginManager.getGameWorlds -> pick the first members-matching world with lowest ping as heuristic
-            try {
-                val lm = Class.forName("net.botwithus.rs3.login.LoginManager")
-                val m = lm.getMethod("getGameWorlds")
-                val worlds = (m.invoke(null) as? java.util.Collection<*>)?.toList() ?: emptyList()
-                var best: Any? = null
-                var bestPing = Int.MAX_VALUE
-                for (w in worlds) {
-                    try {
-                        val ping = (w!!.javaClass.getMethod("getPing").invoke(w) as? Number)?.toInt() ?: continue
-                        if (ping < bestPing) { bestPing = ping; best = w }
-                    } catch (_: Throwable) { }
-                }
-                if (best != null) {
-                    val id = best.javaClass.getMethod("getWorldId").invoke(best) as? Number
-                    if (id != null) return id.toString()
-                }
-            } catch (_: Throwable) { }
-            "N/A"
-        } catch (_: Throwable) { "N/A" }
-    }
-
-    private fun tryGetPingMsText(): String {
-        return try {
-            // Prefer LoginManager.getGameWorlds and use lowest ping as heuristic
-            try {
-                val lm = Class.forName("net.botwithus.rs3.login.LoginManager")
-                val m = lm.getMethod("getGameWorlds")
-                val worlds = (m.invoke(null) as? java.util.Collection<*>)?.toList() ?: emptyList()
-                var bestPing: Int? = null
-                for (w in worlds) {
-                    try {
-                        val ping = (w!!.javaClass.getMethod("getPing").invoke(w) as? Number)?.toInt() ?: continue
-                        if (bestPing == null || ping < bestPing!!) bestPing = ping
-                    } catch (_: Throwable) { }
-                }
-                if (bestPing != null) return bestPing.toString()
-            } catch (_: Throwable) { }
-            "N/A"
-        } catch (_: Throwable) { "N/A" }
     }
 }

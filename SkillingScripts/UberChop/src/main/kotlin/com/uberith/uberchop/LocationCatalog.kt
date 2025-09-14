@@ -87,12 +87,14 @@ object LocationCatalog {
             chop = Coordinate(3243, 3200, 0),
             bank = Coordinate(3214, 3258, 0)
         ),
+        // Verified
         TreeLocation(
             name = "Varrock West",
             availableTrees = listOf("Tree", "Oak", "Ivy"),
             chop = Coordinate(3169, 3421, 0),
             bank = Coordinate(3185, 3436, 0)
         ),
+        // Verified
         TreeLocation(
             name = "Varrock East",
             availableTrees = listOf("Tree", "Oak", "Ivy"),
@@ -104,7 +106,7 @@ object LocationCatalog {
             name = "Draynor Willows",
             availableTrees = listOf("Willow"),
             chop = Coordinate(3085, 3238, 0),
-            bank = Coordinate(3093, 3245, 0)
+            bank = Coordinate(3092, 3245, 0)
         ),
         TreeLocation(
             name = "Edgeville Yews",
@@ -112,9 +114,10 @@ object LocationCatalog {
             chop = Coordinate(3088, 3478, 0),
             bank = Coordinate(3093, 3491, 0)
         ),
+        // Verified
         TreeLocation(
             name = "Seers' Village",
-            availableTrees = listOf("Maple", "Magic", "Yew"),
+            availableTrees = listOf("Tree", "Oak", "Maple", "Yew"),
             chop = Coordinate(2725, 3491, 0),
             bank = Coordinate(2723, 3493, 0)
         ),
@@ -142,9 +145,10 @@ object LocationCatalog {
             chop = Coordinate(3059, 3311, 0),
             bank = Coordinate(3013, 3355, 0)
         ),
+        // Verified
         TreeLocation(
             name = "Seers' Magics (Tower)",
-            availableTrees = listOf("Magic"),
+            availableTrees = listOf("Tree", "Oak", "Magic"),
             chop = Coordinate(2706, 3405, 0),
             bank = Coordinate(2723, 3493, 0)
         ),

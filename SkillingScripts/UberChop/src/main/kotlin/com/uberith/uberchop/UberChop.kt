@@ -220,7 +220,7 @@ class UberChop : SuspendableScript() {
 
                 // Move towards configured chop tile if present and not nearby
                 effectiveChopCoordinate()?.let { chopTile ->
-                    if (!Coordinates.isPlayerWithinRadius(chopTile, 20)) {
+                    if (!Coordinates.isPlayerWithinRadius(chopTile, 40)) {
                         logger.info("Walking to chop tile $chopTile")
                         val walkCoordinates = Coordinates.randomReachableNear(chopTile, 10, 32)
                         Traverse.walkTo(walkCoordinates, true)
