@@ -9,6 +9,7 @@ import java.io.ByteArrayOutputStream
 import javax.imageio.ImageIO
 import com.uberith.api.ui.ColorManager
 import com.uberith.api.ui.CustomImages
+import net.botwithus.rs3.entities.LocalPlayer
 
 class UberChopGUI(private val script: UberChop) : BuildableUI {
     // 0 Overview, 1 Core, 2 Handlers, 3 WorldHop, 4 Advanced, 5 Statistics, 6 Support, 7 Debug
@@ -85,7 +86,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             if (minimized) {
                 val worldText = tryGetWorldIdText()
                 val pingText = tryGetPingMsText()
-                val coordText = tryGetPlayerCoordsText()
+                val coordText = LocalPlayer.self().coordinate
                 ImGui.text("W: $worldText  |  Ping: $pingText ms  |  XYZ: $coordText")
                 cm.popColors()
                 ImGui.end()
@@ -145,9 +146,8 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             ImGui.separator()
             val worldText = tryGetWorldIdText()
             val pingText = tryGetPingMsText()
-            val coordText = tryGetPlayerCoordsText()
-            val animText = tryGetAnimIdText()
-            ImGui.text("W: $worldText  |  Ping: $pingText ms  |  XYZ: $coordText  |  Anim: $animText")
+            val coordText = LocalPlayer.self().coordinate
+            ImGui.text("W: $worldText  |  Ping: $pingText ms  |  XYZ: $coordText  |  Anim: ${LocalPlayer.self().animationId}")
             cm.popColors()
         }
         ImGui.end()
@@ -1305,50 +1305,5 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             } catch (_: Throwable) { }
             "N/A"
         } catch (_: Throwable) { "N/A" }
-    }
-
-    private fun tryGetPlayerCoordsText(): String {
-        return try {
-            // Prefer RS3 LocalPlayer API via reflection to avoid hard linking
-            val cls = Class.forName("net.botwithus.rs3.entities.LocalPlayer")
-            val mSelf = cls.getMethod("self")
-            val player = mSelf.invoke(null) ?: return "—"
-            val mCoord = player.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.lowercase().contains("coordinate") }
-            val coord = mCoord?.invoke(player) ?: return "—"
-            val xM = coord.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.lowercase() in setOf("x", "getx", "getxcoord", "getxcoordinate") }
-            val yM = coord.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.lowercase() in setOf("y", "gety", "getycoord", "getycoordinate") }
-            val zM = coord.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.lowercase() in setOf("z", "getz", "getplane", "getlevel") }
-            val x = (xM?.invoke(coord) as? Number)?.toInt()
-            val y = (yM?.invoke(coord) as? Number)?.toInt()
-            val z = (zM?.invoke(coord) as? Number)?.toInt()
-            if (x != null && y != null && z != null) "$x, $y, $z" else "—"
-        } catch (_: Throwable) {
-            try {
-                // Fallback: XAPI style LocalPlayer
-                val cls = Class.forName("net.botwithus.xapi.game.actor.LocalPlayer")
-                val mSelf = cls.getMethod("self")
-                val player = mSelf.invoke(null) ?: return "—"
-                val mCoord = player.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.lowercase().contains("coordinate") }
-                val coord = mCoord?.invoke(player) ?: return "—"
-                val xM = coord.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.lowercase().contains("x") }
-                val yM = coord.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.lowercase().contains("y") }
-                val zM = coord.javaClass.methods.firstOrNull { it.parameterCount == 0 && (it.name.lowercase().contains("z") || it.name.lowercase().contains("plane") || it.name.lowercase().contains("level")) }
-                val x = (xM?.invoke(coord) as? Number)?.toInt()
-                val y = (yM?.invoke(coord) as? Number)?.toInt()
-                val z = (zM?.invoke(coord) as? Number)?.toInt()
-                if (x != null && y != null && z != null) "$x, $y, $z" else "—"
-            } catch (_: Throwable) { "—" }
-        }
-    }
-
-    private fun tryGetAnimIdText(): String {
-        return try {
-            val cls = Class.forName("net.botwithus.rs3.entities.LocalPlayer")
-            val mSelf = cls.getMethod("self")
-            val player = mSelf.invoke(null) ?: return "-"
-            val mAnim = player.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name.lowercase().contains("animation") }
-            val id = (mAnim?.invoke(player) as? Number)?.toInt()
-            id?.toString() ?: "-"
-        } catch (_: Throwable) { "-" }
     }
 }
