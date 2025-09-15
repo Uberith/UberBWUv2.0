@@ -9,8 +9,7 @@
         <option name="modules">
           <set>
             <option value="$PROJECT_DIR$" />
-            <option value="$PROJECT_DIR$/SkillingScripts" />
-            <option value="$PROJECT_DIR$/SkillingScripts/UberChop" />
+            <option value="$PROJECT_DIR$/app" />
             <option value="$PROJECT_DIR$/script-api" />
           </set>
         </option>

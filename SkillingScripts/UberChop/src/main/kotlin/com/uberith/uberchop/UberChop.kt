@@ -188,6 +188,14 @@ class UberChop : SuspendableScript() {
                     awaitTicks(1)
                 }
 
+                // If Withdrawal wood box is enabled, retrieve from bank
+                val woodBoxPat = java.util.regex.Pattern.compile(".*wood box.*", java.util.regex.Pattern.CASE_INSENSITIVE)
+                if (!Backpack.contains(woodBoxPat) && withdrawWoodBox) {
+                    Bank.withdraw(woodBoxPat, 1)
+                    awaitTicks(1)
+                    return
+                }
+
             }
             Phase.CHOPPING -> {
                 if (Backpack.isFull()) {

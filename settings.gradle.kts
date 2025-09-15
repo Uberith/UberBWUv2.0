@@ -4,18 +4,28 @@ pluginManagement {
         google()
         mavenCentral()
     }
+    plugins {
+        // Centralize plugin versions to avoid classpath conflicts
+        kotlin("jvm") version "2.2.0"
+        kotlin("multiplatform") version "2.2.0"
+        kotlin("plugin.serialization") version "2.2.0"
+        id("com.android.library") version "8.7.2"
+    }
 }
 
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        // Prefer central, but also allow local artifacts
+        mavenLocal()
         google()
         mavenCentral()
+        maven("https://nexus.botwithus.net/repository/maven-releases/")
+        maven("https://nexus.botwithus.net/repository/maven-snapshots/")
     }
 }
 
-rootProject.name = "UberChop"
+rootProject.name = "UberBWU2.0"
 
 include(":script-api")
 include(":app")
-

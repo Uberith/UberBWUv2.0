@@ -2,13 +2,14 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
-    kotlin("jvm") version "2.2.0"
+    kotlin("jvm")
 }
 
 group = "uberith"
 version = "1.0.0"
 
 allprojects {
+    if (project.path == ":script-api") return@allprojects
     val hasKotlin = file("src/main/kotlin").exists() || file("src/test/kotlin").exists()
     val hasJava = file("src/main/java").exists() || file("src/test/java").exists()
     val hasSources = hasKotlin || hasJava
@@ -21,12 +22,7 @@ allprojects {
         }
     }
 
-    repositories {
-        mavenLocal()
-        mavenCentral()
-        maven("https://nexus.botwithus.net/repository/maven-releases/")
-        maven("https://nexus.botwithus.net/repository/maven-snapshots/")
-    }
+    // Repositories are managed centrally in settings.gradle.kts
 
     if (hasSources) {
         configurations {
@@ -46,7 +42,6 @@ allprojects {
             }
 
             toolchain {
-                // Align with platform dependencies that require JDK 24
                 languageVersion.set(JavaLanguageVersion.of(24))
             }
         }
@@ -63,8 +58,8 @@ allprojects {
             add("includeInJar", "net.botwithus.xapi:xapi:2.0.+")
 
             if (hasKotlin) {
-                // Compile against kotlin-stdlib 2.0.0 (platform provides this at runtime)
-                compileOnly("org.jetbrains.kotlin:kotlin-stdlib:2.0.0")
+                // Compile against kotlin-stdlib 2.2.0 (platform provides this at runtime)
+                compileOnly("org.jetbrains.kotlin:kotlin-stdlib:2.2.0")
                 // Use the Jvm variant to avoid duplicate module names on the module path
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.7.1")
                 testImplementation(kotlin("test"))
@@ -83,9 +78,9 @@ allprojects {
 
         tasks.withType<KotlinCompile>().configureEach {
             compilerOptions {
-                // Target Kotlin 2.0 metadata/API for runtime compatibility with platform
-                languageVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_0)
-                apiVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_0)
+                // Kotlin 2.2 language and API, target JVM 24
+                languageVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_2)
+                apiVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_2)
 
                 jvmTarget.set(JvmTarget.JVM_24)
                 freeCompilerArgs.add("-Xjdk-release=24")
@@ -101,21 +96,21 @@ allprojects {
     // Avoid bringing both kotlinx-coroutines-core and -core-jvm onto the module path
     configurations.configureEach {
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
-        // Pin only stdlib artifacts to 2.0.0; leave Build Tools artifacts to the KGP version
+        // Pin only stdlib artifacts to 2.2.0; leave Build Tools artifacts to the KGP version
         resolutionStrategy.eachDependency {
             if (requested.group == "org.jetbrains.kotlin") {
                 if (requested.name == "kotlin-stdlib" ||
                     requested.name.startsWith("kotlin-stdlib-") ||
                     requested.name == "kotlin-reflect") {
-                    useVersion("2.0.0")
+                    useVersion("2.2.0")
                 }
             }
         }
         resolutionStrategy.force(
-            "org.jetbrains.kotlin:kotlin-stdlib:2.0.0",
-            "org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.0.0",
-            "org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.0.0",
-            "org.jetbrains.kotlin:kotlin-reflect:2.0.0"
+            "org.jetbrains.kotlin:kotlin-stdlib:2.2.0",
+            "org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.2.0",
+            "org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.2.0",
+            "org.jetbrains.kotlin:kotlin-reflect:2.2.0"
         )
     }
 
