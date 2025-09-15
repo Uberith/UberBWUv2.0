@@ -723,6 +723,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                     script.settings.savedTreeType = e.idx
                     script.targetTree = e.name
                     treeChanged = true
+                    script.saveSettings(script.settings)
                 }
             }
             ImGui.endCombo()
@@ -741,6 +742,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             val fallback = filtered.firstOrNull()?.name ?: script.treeLocations.firstOrNull()?.name ?: ""
             script.location = fallback
             script.settings.savedLocation = fallback
+            script.saveSettings(script.settings)
         }
         val locationNames = filtered.map { it.name }
         val curLocName = script.location
@@ -754,6 +756,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                 if (ImGui.selectable(locationNames[i], isSelected, 0, 0f, 0f)) {
                     script.location = locationNames[i]
                     script.settings.savedLocation = script.location
+                    script.saveSettings(script.settings)
                 }
             }
             ImGui.endCombo()
@@ -791,6 +794,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                     val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
                     cur.chopX = x; cur.chopY = y; cur.chopZ = z
                     map[curLoc] = cur
+                    script.saveSettings(script.settings)
                 }
             }
             ImGui.sameLine(0f, 6f)
@@ -808,6 +812,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                         val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
                         cur.chopX = x.toInt(); cur.chopY = y.toInt(); cur.chopZ = z.toInt()
                         map[curLoc] = cur
+                        script.saveSettings(script.settings)
                     }
                 } catch (_: Throwable) { }
             }
@@ -828,6 +833,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                     val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
                     cur.bankX = x; cur.bankY = y; cur.bankZ = z
                     map[curLoc] = cur
+                    script.saveSettings(script.settings)
                 }
             }
             ImGui.sameLine(0f, 6f)
@@ -845,6 +851,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                         val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
                         cur.bankX = x.toInt(); cur.bankY = y.toInt(); cur.bankZ = z.toInt()
                         map[curLoc] = cur
+                        script.saveSettings(script.settings)
                     }
                 } catch (_: Throwable) { }
             }
@@ -913,20 +920,43 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
     }
 
     private fun drawCore() {
-        var b = ImGui.checkbox("Pickup Nests", script.settings.pickupNests)
-        script.settings.pickupNests = b
-        b = ImGui.checkbox("Enable Tree Rotation", script.settings.enableTreeRotation)
-        script.settings.enableTreeRotation = b
-        b = ImGui.checkbox("Enable World Hopping", script.settings.enableWorldHopping)
-        script.settings.enableWorldHopping = b
-        b = ImGui.checkbox("Use Magic Notepaper", script.settings.useMagicNotepaper)
-        script.settings.useMagicNotepaper = b
-        b = ImGui.checkbox("Use Crystallise", script.settings.useCrystallise)
-        script.settings.useCrystallise = b
-        b = ImGui.checkbox("Use Juju Potions", script.settings.useJujuPotions)
-        script.settings.useJujuPotions = b
-        b = ImGui.checkbox("Withdraw Wood Box", script.settings.withdrawWoodBox)
-        script.settings.withdrawWoodBox = b
+        var changed = false
+        run {
+            val old = script.settings.pickupNests
+            val v = ImGui.checkbox("Pickup Nests", old)
+            if (v != old) { script.settings.pickupNests = v; changed = true }
+        }
+        run {
+            val old = script.settings.enableTreeRotation
+            val v = ImGui.checkbox("Enable Tree Rotation", old)
+            if (v != old) { script.settings.enableTreeRotation = v; changed = true }
+        }
+        run {
+            val old = script.settings.enableWorldHopping
+            val v = ImGui.checkbox("Enable World Hopping", old)
+            if (v != old) { script.settings.enableWorldHopping = v; changed = true }
+        }
+        run {
+            val old = script.settings.useMagicNotepaper
+            val v = ImGui.checkbox("Use Magic Notepaper", old)
+            if (v != old) { script.settings.useMagicNotepaper = v; changed = true }
+        }
+        run {
+            val old = script.settings.useCrystallise
+            val v = ImGui.checkbox("Use Crystallise", old)
+            if (v != old) { script.settings.useCrystallise = v; changed = true }
+        }
+        run {
+            val old = script.settings.useJujuPotions
+            val v = ImGui.checkbox("Use Juju Potions", old)
+            if (v != old) { script.settings.useJujuPotions = v; changed = true }
+        }
+        run {
+            val old = script.settings.withdrawWoodBox
+            val v = ImGui.checkbox("Withdraw Wood Box", old)
+            if (v != old) { script.settings.withdrawWoodBox = v; changed = true }
+        }
+        if (changed) script.saveSettings(script.settings)
     }
 
     // --- Helpers for Overview readiness ---
@@ -1006,63 +1036,179 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
     }
 
     private fun drawHandlers() {
+        var changed = false
         header("Break Handler", ColorManager())
-        var b = ImGui.checkbox("Random Breaks", script.settings.performRandomBreak)
-        script.settings.performRandomBreak = b
-        script.settings.breakFrequency = adjustInt("Breaks/hr", script.settings.breakFrequency, 0, 12)
-        script.settings.minBreak = adjustInt("Min Break (s)", script.settings.minBreak, 0, 600, 5)
-        script.settings.maxBreak = adjustInt("Max Break (s)", script.settings.maxBreak, 0, 3600, 5)
+        run {
+            val old = script.settings.performRandomBreak
+            val v = ImGui.checkbox("Random Breaks", old)
+            if (v != old) { script.settings.performRandomBreak = v; changed = true }
+        }
+        run {
+            val old = script.settings.breakFrequency
+            val v = adjustInt("Breaks/hr", old, 0, 12)
+            if (v != old) { script.settings.breakFrequency = v; changed = true }
+        }
+        run {
+            val old = script.settings.minBreak
+            val v = adjustInt("Min Break (s)", old, 0, 600, 5)
+            if (v != old) { script.settings.minBreak = v; changed = true }
+        }
+        run {
+            val old = script.settings.maxBreak
+            val v = adjustInt("Max Break (s)", old, 0, 3600, 5)
+            if (v != old) { script.settings.maxBreak = v; changed = true }
+        }
 
         ImGui.separator()
         header("Logout Handler", ColorManager())
-        b = ImGui.checkbox("Enable Timed Logout", script.settings.logoutDurationEnable)
-        script.settings.logoutDurationEnable = b
-        script.settings.logoutHours = adjustInt("After (h)", script.settings.logoutHours, 0, 24)
-        script.settings.logoutMinutes = adjustInt("After (m)", script.settings.logoutMinutes, 0, 59)
-        script.settings.logoutSeconds = adjustInt("After (s)", script.settings.logoutSeconds, 0, 59)
+        run {
+            val old = script.settings.logoutDurationEnable
+            val v = ImGui.checkbox("Enable Timed Logout", old)
+            if (v != old) { script.settings.logoutDurationEnable = v; changed = true }
+        }
+        run {
+            val old = script.settings.logoutHours
+            val v = adjustInt("After (h)", old, 0, 24)
+            if (v != old) { script.settings.logoutHours = v; changed = true }
+        }
+        run {
+            val old = script.settings.logoutMinutes
+            val v = adjustInt("After (m)", old, 0, 59)
+            if (v != old) { script.settings.logoutMinutes = v; changed = true }
+        }
+        run {
+            val old = script.settings.logoutSeconds
+            val v = adjustInt("After (s)", old, 0, 59)
+            if (v != old) { script.settings.logoutSeconds = v; changed = true }
+        }
 
         ImGui.separator()
         header("AFK Handler", ColorManager())
-        b = ImGui.checkbox("Enable AFK", script.settings.enableAfk)
-        script.settings.enableAfk = b
-        script.settings.afkEveryMin = adjustInt("Every min (m)", script.settings.afkEveryMin, 0, 180)
-        script.settings.afkEveryMax = adjustInt("Every max (m)", script.settings.afkEveryMax, 0, 240)
-        script.settings.afkDurationMin = adjustInt("Duration min (s)", script.settings.afkDurationMin, 0, 600, 5)
-        script.settings.afkDurationMax = adjustInt("Duration max (s)", script.settings.afkDurationMax, 0, 3600, 5)
+        run {
+            val old = script.settings.enableAfk
+            val v = ImGui.checkbox("Enable AFK", old)
+            if (v != old) { script.settings.enableAfk = v; changed = true }
+        }
+        run {
+            val old = script.settings.afkEveryMin
+            val v = adjustInt("Every min (m)", old, 0, 180)
+            if (v != old) { script.settings.afkEveryMin = v; changed = true }
+        }
+        run {
+            val old = script.settings.afkEveryMax
+            val v = adjustInt("Every max (m)", old, 0, 240)
+            if (v != old) { script.settings.afkEveryMax = v; changed = true }
+        }
+        run {
+            val old = script.settings.afkDurationMin
+            val v = adjustInt("Duration min (s)", old, 0, 600, 5)
+            if (v != old) { script.settings.afkDurationMin = v; changed = true }
+        }
+        run {
+            val old = script.settings.afkDurationMax
+            val v = adjustInt("Duration max (s)", old, 0, 3600, 5)
+            if (v != old) { script.settings.afkDurationMax = v; changed = true }
+        }
 
         ImGui.separator()
         header("Auto-Stop", ColorManager())
-        b = ImGui.checkbox("Enable Auto-Stop", script.settings.enableAutoStop)
-        script.settings.enableAutoStop = b
-        script.settings.stopAfterHours = adjustInt("After (h)", script.settings.stopAfterHours, 0, 48)
-        script.settings.stopAfterMinutes = adjustInt("After (m)", script.settings.stopAfterMinutes, 0, 59)
-        script.settings.stopAfterXp = adjustInt("After XP", script.settings.stopAfterXp, 0, 50_000_000, 1000)
-        script.settings.stopAfterLogs = adjustInt("After Logs", script.settings.stopAfterLogs, 0, 1_000_000, 10)
+        run {
+            val old = script.settings.enableAutoStop
+            val v = ImGui.checkbox("Enable Auto-Stop", old)
+            if (v != old) { script.settings.enableAutoStop = v; changed = true }
+        }
+        run {
+            val old = script.settings.stopAfterHours
+            val v = adjustInt("After (h)", old, 0, 48)
+            if (v != old) { script.settings.stopAfterHours = v; changed = true }
+        }
+        run {
+            val old = script.settings.stopAfterMinutes
+            val v = adjustInt("After (m)", old, 0, 59)
+            if (v != old) { script.settings.stopAfterMinutes = v; changed = true }
+        }
+        run {
+            val old = script.settings.stopAfterXp
+            val v = adjustInt("After XP", old, 0, 50_000_000, 1000)
+            if (v != old) { script.settings.stopAfterXp = v; changed = true }
+        }
+        run {
+            val old = script.settings.stopAfterLogs
+            val v = adjustInt("After Logs", old, 0, 1_000_000, 10)
+            if (v != old) { script.settings.stopAfterLogs = v; changed = true }
+        }
+
+        if (changed) script.saveSettings(script.settings)
     }
 
     private fun drawWorldHop() {
         header("World Hop Filters", ColorManager())
-        script.settings.minPing = adjustInt("Min Ping", script.settings.minPing, 0, 1000, 5)
-        script.settings.maxPing = adjustInt("Max Ping", script.settings.maxPing, 0, 1000, 5)
-        script.settings.minPopulation = adjustInt("Min Pop", script.settings.minPopulation, 0, 4000, 10)
-        script.settings.maxPopulation = adjustInt("Max Pop", script.settings.maxPopulation, 0, 4000, 10)
-        script.settings.hopDelayMs = adjustInt("Hop Delay (ms)", script.settings.hopDelayMs, 0, 60_000, 100)
-        var b = ImGui.checkbox("Members-Only Worlds", script.settings.memberOnlyWorlds)
-        script.settings.memberOnlyWorlds = b
-        b = ImGui.checkbox("Only F2P", script.settings.onlyFreeToPlay)
-        script.settings.onlyFreeToPlay = b
-        b = ImGui.checkbox("Hop On Chat Activity", script.settings.hopOnChat)
-        script.settings.hopOnChat = b
-        b = ImGui.checkbox("Hop On Crowd Threshold", script.settings.hopOnCrowd)
-        script.settings.hopOnCrowd = b
-        script.settings.playerThreshold = adjustInt("Player Threshold", script.settings.playerThreshold, 0, 200, 1)
-        b = ImGui.checkbox("Hop On No Trees", script.settings.hopOnNoTrees)
-        script.settings.hopOnNoTrees = b
+        var changed = false
+        run {
+            val old = script.settings.minPing
+            val v = adjustInt("Min Ping", old, 0, 1000, 5)
+            if (v != old) { script.settings.minPing = v; changed = true }
+        }
+        run {
+            val old = script.settings.maxPing
+            val v = adjustInt("Max Ping", old, 0, 1000, 5)
+            if (v != old) { script.settings.maxPing = v; changed = true }
+        }
+        run {
+            val old = script.settings.minPopulation
+            val v = adjustInt("Min Pop", old, 0, 4000, 10)
+            if (v != old) { script.settings.minPopulation = v; changed = true }
+        }
+        run {
+            val old = script.settings.maxPopulation
+            val v = adjustInt("Max Pop", old, 0, 4000, 10)
+            if (v != old) { script.settings.maxPopulation = v; changed = true }
+        }
+        run {
+            val old = script.settings.hopDelayMs
+            val v = adjustInt("Hop Delay (ms)", old, 0, 60_000, 100)
+            if (v != old) { script.settings.hopDelayMs = v; changed = true }
+        }
+        run {
+            val old = script.settings.memberOnlyWorlds
+            val v = ImGui.checkbox("Members-Only Worlds", old)
+            if (v != old) { script.settings.memberOnlyWorlds = v; changed = true }
+        }
+        run {
+            val old = script.settings.onlyFreeToPlay
+            val v = ImGui.checkbox("Only F2P", old)
+            if (v != old) { script.settings.onlyFreeToPlay = v; changed = true }
+        }
+        run {
+            val old = script.settings.hopOnChat
+            val v = ImGui.checkbox("Hop On Chat Activity", old)
+            if (v != old) { script.settings.hopOnChat = v; changed = true }
+        }
+        run {
+            val old = script.settings.hopOnCrowd
+            val v = ImGui.checkbox("Hop On Crowd Threshold", old)
+            if (v != old) { script.settings.hopOnCrowd = v; changed = true }
+        }
+        run {
+            val old = script.settings.playerThreshold
+            val v = adjustInt("Player Threshold", old, 0, 200, 1)
+            if (v != old) { script.settings.playerThreshold = v; changed = true }
+        }
+        run {
+            val old = script.settings.hopOnNoTrees
+            val v = ImGui.checkbox("Hop On No Trees", old)
+            if (v != old) { script.settings.hopOnNoTrees = v; changed = true }
+        }
+        if (changed) script.saveSettings(script.settings)
     }
 
     private fun drawAdvanced() {
         ImGui.text("Saved Preferences")
-        script.settings.savedTreeType = adjustInt("Saved Tree Type", script.settings.savedTreeType, 0, 50, 1)
+        run {
+            val old = script.settings.savedTreeType
+            val v = adjustInt("Saved Tree Type", old, 0, 50, 1)
+            if (v != old) { script.settings.savedTreeType = v; script.saveSettings(script.settings) }
+        }
         ImGui.text("Saved Location: ${script.settings.savedLocation}")
         ImGui.separator()
         ImGui.text("Custom Locations")
@@ -1098,6 +1244,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                     val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
                     cur.chopX = x.toInt(); cur.chopY = y.toInt(); cur.chopZ = z.toInt()
                     map[curLoc] = cur
+                    script.saveSettings(script.settings)
                 }
             } catch (_: Throwable) {}
         }
@@ -1106,6 +1253,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             val map = script.settings.customLocations
             val cur = map[curLoc]
             if (cur != null) { cur.chopX = null; cur.chopY = null; cur.chopZ = null; if (cur.bankX==null && cur.bankY==null && cur.bankZ==null) map.remove(curLoc) else map[curLoc]=cur }
+            script.saveSettings(script.settings)
         }
         if (ImGui.button("Set Bank Tile", 120f, 0f)) {
             try {
@@ -1120,6 +1268,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                     val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
                     cur.bankX = x.toInt(); cur.bankY = y.toInt(); cur.bankZ = z.toInt()
                     map[curLoc] = cur
+                    script.saveSettings(script.settings)
                 }
             } catch (_: Throwable) {}
         }
@@ -1128,18 +1277,19 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             val map = script.settings.customLocations
             val cur = map[curLoc]
             if (cur != null) { cur.bankX = null; cur.bankY = null; cur.bankZ = null; if (cur.chopX==null && cur.chopY==null && cur.chopZ==null) map.remove(curLoc) else map[curLoc]=cur }
+            script.saveSettings(script.settings)
         }
         ImGui.separator()
         ImGui.text("Deposit Filters")
         ImGui.text("Include: ${script.settings.depositInclude.size}  |  Keep: ${script.settings.depositKeep.size}")
-        if (ImGui.button("Add Blossom", 110f, 0f)) { if (!script.settings.depositInclude.contains("Crystal tree blossom")) script.settings.depositInclude.add("Crystal tree blossom") }
+        if (ImGui.button("Add Blossom", 110f, 0f)) { if (!script.settings.depositInclude.contains("Crystal tree blossom")) { script.settings.depositInclude.add("Crystal tree blossom"); script.saveSettings(script.settings) } }
         ImGui.sameLine(0f, 6f)
-        if (ImGui.button("Add Bamboo", 110f, 0f)) { if (!script.settings.depositInclude.contains("Bamboo")) script.settings.depositInclude.add("Bamboo") }
+        if (ImGui.button("Add Bamboo", 110f, 0f)) { if (!script.settings.depositInclude.contains("Bamboo")) { script.settings.depositInclude.add("Bamboo"); script.saveSettings(script.settings) } }
         ImGui.sameLine(0f, 6f)
-        if (ImGui.button("Keep Nests", 110f, 0f)) { if (!script.settings.depositKeep.contains("Bird's nest")) script.settings.depositKeep.add("Bird's nest") }
-        if (ImGui.button("Clear Include", 110f, 0f)) { script.settings.depositInclude.clear() }
+        if (ImGui.button("Keep Nests", 110f, 0f)) { if (!script.settings.depositKeep.contains("Bird's nest")) { script.settings.depositKeep.add("Bird's nest"); script.saveSettings(script.settings) } }
+        if (ImGui.button("Clear Include", 110f, 0f)) { script.settings.depositInclude.clear(); script.saveSettings(script.settings) }
         ImGui.sameLine(0f, 6f)
-        if (ImGui.button("Clear Keep", 110f, 0f)) { script.settings.depositKeep.clear() }
+        if (ImGui.button("Clear Keep", 110f, 0f)) { script.settings.depositKeep.clear(); script.saveSettings(script.settings) }
         ImGui.sameLine(0f, 6f)
         if (ImGui.button("Add From Clipboard", 160f, 0f)) {
             try {
@@ -1147,7 +1297,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                 val data = cb.getData(java.awt.datatransfer.DataFlavor.stringFlavor) as? String
                 val text = data?.trim()
                 if (!text.isNullOrEmpty()) {
-                    if (!script.settings.depositInclude.contains(text)) script.settings.depositInclude.add(text)
+                    if (!script.settings.depositInclude.contains(text)) { script.settings.depositInclude.add(text); script.saveSettings(script.settings) }
                 }
             } catch (_: Throwable) { }
         }
@@ -1160,7 +1310,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                 val name = iter.next()
                 ImGui.text(name)
                 ImGui.sameLine(0f, 8f)
-                if (ImGui.button("x##inc_$idx", 20f, 0f)) { iter.remove() }
+                if (ImGui.button("x##inc_$idx", 20f, 0f)) { iter.remove(); script.saveSettings(script.settings) }
                 idx++
             }
         }
@@ -1174,7 +1324,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                 val name = iterK.next()
                 ImGui.text(name)
                 ImGui.sameLine(0f, 8f)
-                if (ImGui.button("x##keep_$k", 20f, 0f)) { iterK.remove() }
+                if (ImGui.button("x##keep_$k", 20f, 0f)) { iterK.remove(); script.saveSettings(script.settings) }
                 k++
             }
             if (ImGui.button("Add Keep From Clipboard", 200f, 0f)) {
@@ -1182,18 +1332,28 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                     val cb = java.awt.Toolkit.getDefaultToolkit().systemClipboard
                     val data = cb.getData(java.awt.datatransfer.DataFlavor.stringFlavor) as? String
                     val text = data?.trim()
-                    if (!text.isNullOrEmpty() && !script.settings.depositKeep.contains(text)) script.settings.depositKeep.add(text)
+                    if (!text.isNullOrEmpty() && !script.settings.depositKeep.contains(text)) { script.settings.depositKeep.add(text); script.saveSettings(script.settings) }
                 } catch (_: Throwable) { }
             }
         }
         ImGui.endChild()
         ImGui.separator()
         ImGui.text("Auto-Skill")
-        var b = ImGui.checkbox("Auto-Progress Tree", script.settings.autoProgressTree)
-        script.settings.autoProgressTree = b
-        b = ImGui.checkbox("Auto-Upgrade Tree", script.settings.autoUpgradeTree)
-        script.settings.autoUpgradeTree = b
-        script.settings.tanningProductIndex = adjustInt("Preset/Prod Index", script.settings.tanningProductIndex, 0, 20)
+        run {
+            val old = script.settings.autoProgressTree
+            val v = ImGui.checkbox("Auto-Progress Tree", old)
+            if (v != old) { script.settings.autoProgressTree = v; script.saveSettings(script.settings) }
+        }
+        run {
+            val old = script.settings.autoUpgradeTree
+            val v = ImGui.checkbox("Auto-Upgrade Tree", old)
+            if (v != old) { script.settings.autoUpgradeTree = v; script.saveSettings(script.settings) }
+        }
+        run {
+            val old = script.settings.tanningProductIndex
+            val v = adjustInt("Preset/Prod Index", old, 0, 20)
+            if (v != old) { script.settings.tanningProductIndex = v; script.saveSettings(script.settings) }
+        }
     }
 
     private fun drawStatistics() {

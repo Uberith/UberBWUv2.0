@@ -1,6 +1,8 @@
 package com.uberith.uberchop
 
 import com.uberith.api.SuspendableScript
+import com.uberith.api.utils.Persistence
+import com.google.gson.reflect.TypeToken
 import com.uberith.api.game.inventory.Backpack
 import com.uberith.api.game.inventory.Bank
 import com.uberith.api.game.skills.woodcutting.Trees
@@ -23,7 +25,89 @@ import kotlin.random.Random
     author = "Uberith"
 )
 class UberChop : SuspendableScript() {
+    // Persistence for user settings
+    private val settingsPersistence = Persistence<Settings>("UberChop.json", object : TypeToken<Settings>() {}.type)
 
+    // Load settings from disk (if present) into the current settings instance
+    private fun loadSettings() {
+        settingsPersistence.loadData()?.let { s ->
+            // Break handler
+            settings.performRandomBreak = s.performRandomBreak
+            settings.breakFrequency = s.breakFrequency
+            settings.minBreak = s.minBreak
+            settings.maxBreak = s.maxBreak
+
+            // Logout handler
+            settings.logoutDurationEnable = s.logoutDurationEnable
+            settings.logoutHours = s.logoutHours
+            settings.logoutMinutes = s.logoutMinutes
+            settings.logoutSeconds = s.logoutSeconds
+
+            // AFK handler
+            settings.enableAfk = s.enableAfk
+            settings.afkEveryMin = s.afkEveryMin
+            settings.afkEveryMax = s.afkEveryMax
+            settings.afkDurationMin = s.afkDurationMin
+            settings.afkDurationMax = s.afkDurationMax
+
+            // Auto-Stop handler
+            settings.enableAutoStop = s.enableAutoStop
+            settings.stopAfterHours = s.stopAfterHours
+            settings.stopAfterMinutes = s.stopAfterMinutes
+            settings.stopAfterXp = s.stopAfterXp
+            settings.stopAfterLogs = s.stopAfterLogs
+
+            // Extra features
+            settings.pickupNests = s.pickupNests
+            settings.enableTreeRotation = s.enableTreeRotation
+
+            // Control
+            settings.enableWorldHopping = s.enableWorldHopping
+            settings.useMagicNotepaper = s.useMagicNotepaper
+            settings.useCrystallise = s.useCrystallise
+            settings.useJujuPotions = s.useJujuPotions
+
+            // Auto-skill
+            settings.autoProgressTree = s.autoProgressTree
+            settings.autoUpgradeTree = s.autoUpgradeTree
+            settings.tanningProductIndex = s.tanningProductIndex
+
+            // World hopping filters
+            settings.minPing = s.minPing
+            settings.maxPing = s.maxPing
+            settings.minPopulation = s.minPopulation
+            settings.maxPopulation = s.maxPopulation
+            settings.hopDelayMs = s.hopDelayMs
+            settings.memberOnlyWorlds = s.memberOnlyWorlds
+            settings.onlyFreeToPlay = s.onlyFreeToPlay
+            settings.hopOnChat = s.hopOnChat
+            settings.hopOnCrowd = s.hopOnCrowd
+            settings.playerThreshold = s.playerThreshold
+            settings.hopOnNoTrees = s.hopOnNoTrees
+
+            // Last used
+            settings.savedTreeType = s.savedTreeType
+            settings.savedLocation = s.savedLocation
+            settings.logHandlingMode = s.logHandlingMode
+
+            // Items
+            settings.withdrawWoodBox = s.withdrawWoodBox
+
+            // Custom per-location and deposit filters
+            settings.customLocations.clear(); settings.customLocations.putAll(s.customLocations)
+            settings.depositInclude.clear(); settings.depositInclude.addAll(s.depositInclude)
+            settings.depositKeep.clear(); settings.depositKeep.addAll(s.depositKeep)
+        }
+    }
+
+    // Persist current settings to disk
+    fun saveSettings(s: Settings = settings) {
+        // Ensure saved tree and location reflect current selections
+        val idx = com.uberith.uberchop.TreeTypes.ALL.indexOf(targetTree)
+        if (idx >= 0) s.savedTreeType = idx
+        s.savedLocation = location
+        settingsPersistence.saveData(s)
+    }
     // Minimal public fields still referenced by the GUI
     val settings = Settings()
     var targetTree: String = "Tree"
@@ -41,6 +125,8 @@ class UberChop : SuspendableScript() {
     
 
     override fun onActivation() {
+        // Load persisted settings before reading them
+        loadSettings()
         val idx = settings.savedTreeType.coerceIn(0, TreeTypes.ALL.size - 1)
         targetTree = TreeTypes.ALL[idx]
         // Initialize location from saved preference if valid for current tree
@@ -64,6 +150,8 @@ class UberChop : SuspendableScript() {
     }
 
     override fun onDeactivation() {
+        // Save settings on deactivation for good measure
+        saveSettings()
         status = "Inactive"
         phase = Phase.READY
         logger.info("Deactivated")

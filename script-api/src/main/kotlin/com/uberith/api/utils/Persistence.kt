@@ -15,7 +15,10 @@ import java.lang.reflect.Type
  */
 class Persistence<T>(private val fileName: String, private val type: Type) {
     private val gson: Gson = GsonBuilder().setPrettyPrinting().create()
-    private val configDir = File(System.getProperty("user.home"), "BotWithUs/scripts/configs")
+    // New default config dir under ~/.BotWithUs/scripts/configs
+    private val newConfigDir = File(System.getProperty("user.home"), ".BotWithUs/scripts/configs")
+    // Legacy path (without leading dot) for backward compatibility when loading
+    private val legacyConfigDir = File(System.getProperty("user.home"), "BotWithUs/scripts/configs")
     private val file: File
 
     /**
@@ -25,11 +28,11 @@ class Persistence<T>(private val fileName: String, private val type: Type) {
      * @param type     The type of the data object, including generic parameters.
      */
     init {
-        if (!configDir.exists()) {
-            configDir.mkdirs()
+        if (!newConfigDir.exists()) {
+            newConfigDir.mkdirs()
         }
 
-        this.file = File(configDir, fileName)
+        this.file = File(newConfigDir, fileName)
     }
 
     /**
@@ -54,8 +57,34 @@ class Persistence<T>(private val fileName: String, private val type: Type) {
      * @return The loaded data object, or null if loading failed.
      */
     fun loadData(): T? {
-        if (!file.exists()) {
-            return null // Return null if the file doesn't exist.
+        // Preferred location
+        if (file.exists()) {
+            try {
+                FileReader(file).use { reader ->
+                    return gson.fromJson(reader, type)
+                }
+            } catch (e: Exception) {
+                // If deserialization fails (schema change, corrupt file, etc.), back up and return null.
+                e.printStackTrace()
+                try {
+                    val backup = File(file.parentFile, file.nameWithoutExtension + ".corrupt-" + System.currentTimeMillis() + ".json")
+                    file.copyTo(backup, overwrite = true)
+                } catch (_: IOException) { /* ignore backup errors */ }
+                return null
+            }
+        }
+
+        // Fallback: attempt to load from legacy location and then migrate on next save
+        val legacyFile = File(legacyConfigDir, file.name)
+        if (legacyFile.exists()) {
+            try {
+                FileReader(legacyFile).use { reader ->
+                    return gson.fromJson(reader, type)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                // Do not back up legacy file here; leave as-is
+            }
         }
 
         try {
@@ -73,4 +102,3 @@ class Persistence<T>(private val fileName: String, private val type: Type) {
         return null
     }
 }
-
