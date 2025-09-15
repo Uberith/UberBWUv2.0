@@ -29,3 +29,5 @@ rootProject.name = "UberBWU2.0"
 
 include(":script-api")
 include(":app")
+
+include("UberScripts")

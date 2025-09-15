@@ -20,7 +20,7 @@ import kotlin.random.Random
 
 @Info(
     name = "UberChop",
-    description = "Minimal tree chopper",
+    description = "Uber tree chopper",
     version = "0.3.0",
     author = "Uberith"
 )
@@ -28,9 +28,45 @@ class UberChop : SuspendableScript() {
     // Persistence for user settings
     private val settingsPersistence = Persistence<Settings>("UberChop.json", object : TypeToken<Settings>() {}.type)
 
+    // Ensure persistence directory/file is initialized as soon as the script is constructed
+    init {
+        try {
+            ensurePersistenceInitialized()
+        } catch (_: Throwable) { }
+    }
+
+    fun ensurePersistenceInitialized() {
+        // Ensure base directory exists
+        val dir = settingsPersistence.location.parentFile
+        val localLog = Persistence.forLog("UberChop")
+        try {
+            val dirOk = settingsPersistence.ensureBaseDir()
+            val msg = "Init persistence: ensureBaseDir dir='${dir?.absolutePath}' ok=${dirOk}"
+            logger.info(msg)
+            localLog.appendLine(msg)
+            if (!dirOk) localLog.appendLine("Init persistence: base dir creation failed for '${dir?.absolutePath}'")
+        } catch (e: Throwable) {
+            logger.error("Init persistence: exception ensuring base dir '{}'", dir?.absolutePath, e)
+            localLog.appendLine("Init persistence: exception ensuring base dir '${dir?.absolutePath}': ${e.message}")
+        }
+        // Ensure file exists; initialize with current in-memory defaults if missing
+        try {
+            val fileOk = settingsPersistence.ensureFile(defaultProvider = { settings })
+            val exists = settingsPersistence.location.exists()
+            val msg = "Init persistence: ensureFile path='${settingsPersistence.location.absolutePath}' ok=${fileOk} exists=${exists}"
+            logger.info(msg)
+            localLog.appendLine(msg)
+            if (!fileOk) localLog.appendLine("Init persistence: failed to create settings file at '${settingsPersistence.location.absolutePath}'")
+        } catch (e: Throwable) {
+            logger.error("Init persistence: exception creating settings file '{}'", settingsPersistence.location.absolutePath, e)
+            localLog.appendLine("Init persistence: exception creating settings file '${settingsPersistence.location.absolutePath}': ${e.message}")
+        }
+    }
+
     // Load settings from disk (if present) into the current settings instance
     private fun loadSettings() {
-        settingsPersistence.loadData()?.let { s ->
+        val s = settingsPersistence.loadOrCreate { settings }
+        run {
             // Break handler
             settings.performRandomBreak = s.performRandomBreak
             settings.breakFrequency = s.breakFrequency
@@ -106,7 +142,11 @@ class UberChop : SuspendableScript() {
         val idx = com.uberith.uberchop.TreeTypes.ALL.indexOf(targetTree)
         if (idx >= 0) s.savedTreeType = idx
         s.savedLocation = location
-        settingsPersistence.saveData(s)
+        // Safer write using atomic replace
+        settingsPersistence.saveDataAtomic(s)
+        try {
+            logger.info("Settings saved to {}", settingsPersistence.location.absolutePath)
+        } catch (_: Throwable) { }
     }
     // Minimal public fields still referenced by the GUI
     val settings = Settings()
@@ -125,6 +165,10 @@ class UberChop : SuspendableScript() {
     
 
     override fun onActivation() {
+        try {
+            ensurePersistenceInitialized()
+        } catch (_: Throwable) { }
+
         // Load persisted settings before reading them
         loadSettings()
         val idx = settings.savedTreeType.coerceIn(0, TreeTypes.ALL.size - 1)
@@ -141,6 +185,8 @@ class UberChop : SuspendableScript() {
             else validForTree.firstOrNull()?.name ?: treeLocations.firstOrNull()?.name.orEmpty()
         settings.savedLocation = location
         logger.info("Activated: tree='$targetTree', location='$location' (locations=${treeLocations.size})")
+        // Persist initial selections so a config file is created even before any UI changes
+        saveSettings()
         status = "Active - Preparing"
         phase = Phase.PREPARING
         // sync cached flags from settings
@@ -158,6 +204,12 @@ class UberChop : SuspendableScript() {
     }
 
     override suspend fun onLoop() {
+        try {
+            ensurePersistenceInitialized()
+        } catch (_: Throwable) { }
+
+        // Load persisted settings before reading them
+        loadSettings()
         val now = System.currentTimeMillis()
         if (lastRuntimeUpdateMs != 0L) totalRuntimeMs += (now - lastRuntimeUpdateMs)
         lastRuntimeUpdateMs = now
@@ -260,6 +312,14 @@ class UberChop : SuspendableScript() {
                     return
                 }
 
+                // If Withdrawal wood box is enabled, retrieve from bank
+                val woodBoxPat = java.util.regex.Pattern.compile(".*wood box.*", java.util.regex.Pattern.CASE_INSENSITIVE)
+                if (!Backpack.contains(woodBoxPat) && withdrawWoodBox) {
+                    Bank.withdraw(woodBoxPat, 1)
+                    awaitTicks(1)
+                    return
+                }
+
                 // If backpack is full, deposit, otherwise switch to chopping
                 if (!Backpack.isFull()) {
                     phase = Phase.CHOPPING
@@ -274,14 +334,6 @@ class UberChop : SuspendableScript() {
                     logger.info("Depositing logs $logsPat")
                     Bank.depositAll(this, logsPat)
                     awaitTicks(1)
-                }
-
-                // If Withdrawal wood box is enabled, retrieve from bank
-                val woodBoxPat = java.util.regex.Pattern.compile(".*wood box.*", java.util.regex.Pattern.CASE_INSENSITIVE)
-                if (!Backpack.contains(woodBoxPat) && withdrawWoodBox) {
-                    Bank.withdraw(woodBoxPat, 1)
-                    awaitTicks(1)
-                    return
                 }
 
             }
@@ -367,6 +419,12 @@ class UberChop : SuspendableScript() {
         super.onInitialize()
         // Prepare GUI resources
         try { gui.preload() } catch (_: Throwable) { }
+        try {
+            ensurePersistenceInitialized()
+        } catch (_: Throwable) { }
+
+        // Load persisted settings before reading them
+        loadSettings()
     }
 
     override fun onDraw(workspace: Workspace) {

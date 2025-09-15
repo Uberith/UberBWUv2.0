@@ -872,7 +872,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         val reqLevel = treeType?.levelReq
         ImGui.text("Recommended WC Level: ${reqLevel ?: "—"}")
         // Show user's WC level, colored green if >= recommended, else red
-        val userWc = UberChop().WCLevel
+        val userWc = script.WCLevel
         ImGui.text("Your WC Level:")
         ImGui.sameLine(0f, 6f)
         when {

@@ -2,103 +2,124 @@ package com.uberith.api.utils
 
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
+import com.uberith.api.BWUInit
+import net.botwithus.ui.WorkspaceManager
+import org.slf4j.LoggerFactory
 import java.io.File
-import java.io.FileReader
-import java.io.FileWriter
-import java.io.IOException
 import java.lang.reflect.Type
 
 /**
- * Provides utility methods for persisting and loading data objects as JSON files.
+ * Properties-backed persistence adapter that stores JSON blobs inside
+ * the current Workspace's Properties under ~/.botwithus/workspaces.
  *
- * @param <T> The type of data to be persisted and loaded.
+ * This preserves the existing Persistence<T> API while removing direct
+ * JSON file I/O. Keys are derived from [fileName] without extension.
  */
-class Persistence<T>(private val fileName: String, private val type: Type) {
+class Persistence<T>(
+    private val fileName: String,
+    private val type: Type,
+    @Suppress("unused") private val baseDir: File = File(".botwithus/configs")
+) {
     private val gson: Gson = GsonBuilder().setPrettyPrinting().create()
-    // New default config dir under ~/.BotWithUs/scripts/configs
-    private val newConfigDir = File(System.getProperty("user.home"), ".BotWithUs/scripts/configs")
-    // Legacy path (without leading dot) for backward compatibility when loading
-    private val legacyConfigDir = File(System.getProperty("user.home"), "BotWithUs/scripts/configs")
-    private val file: File
+    private val log = LoggerFactory.getLogger(Persistence::class.java)
 
-    /**
-     * Constructs a new Persistence for the given file name and data type.
-     *
-     * @param fileName The name of the JSON file to save/load data.
-     * @param type     The type of the data object, including generic parameters.
-     */
-    init {
-        if (!newConfigDir.exists()) {
-            newConfigDir.mkdirs()
-        }
+    // Force initialize Workspace/Module loading once in this JVM
+    @Suppress("unused")
+    private val __init = BWUInit
 
-        this.file = File(newConfigDir, fileName)
+    private val key: String = run {
+        val name = fileName.substringBeforeLast('.', fileName)
+        "configs.$name"
     }
 
-    /**
-     * Saves the given data object to a JSON file.
-     *
-     * @param data The data object to save.
-     */
+    /** Returns the underlying properties file path for the current workspace. */
+    val location: File
+        get() {
+            val home = System.getProperty("user.home")
+            val ws = WorkspaceManager.getManager().getCurrent()
+            return File(File(File(home, ".botwithus"), "workspaces"), ws.uuid + ".properties")
+        }
+
     fun saveData(data: T) {
         try {
-            FileWriter(file).use { writer ->
-                gson.toJson(data, writer)
-            }
-        } catch (e: IOException) {
-            // Handle save failure gracefully or rethrow as needed.
-            e.printStackTrace()
+            val ws = WorkspaceManager.getManager().getCurrent()
+            val props = ws.properties
+            props.setProperty(key, gson.toJson(data, type))
+            // Persist workspace to disk
+            ws.save()
+            WorkspaceManager.save(ws)
+            log.info("saveData: saved key '{}' into workspace '{}'", key, ws.uuid)
+        } catch (e: Exception) {
+            log.error("saveData: failed for key '{}'", key, e)
         }
     }
 
-    /**
-     * Loads the data object from a JSON file.
-     *
-     * @return The loaded data object, or null if loading failed.
-     */
     fun loadData(): T? {
-        // Preferred location
-        if (file.exists()) {
-            try {
-                FileReader(file).use { reader ->
-                    return gson.fromJson(reader, type)
-                }
-            } catch (e: Exception) {
-                // If deserialization fails (schema change, corrupt file, etc.), back up and return null.
-                e.printStackTrace()
-                try {
-                    val backup = File(file.parentFile, file.nameWithoutExtension + ".corrupt-" + System.currentTimeMillis() + ".json")
-                    file.copyTo(backup, overwrite = true)
-                } catch (_: IOException) { /* ignore backup errors */ }
-                return null
-            }
-        }
-
-        // Fallback: attempt to load from legacy location and then migrate on next save
-        val legacyFile = File(legacyConfigDir, file.name)
-        if (legacyFile.exists()) {
-            try {
-                FileReader(legacyFile).use { reader ->
-                    return gson.fromJson(reader, type)
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                // Do not back up legacy file here; leave as-is
-            }
-        }
-
-        try {
-            FileReader(file).use { reader ->
-                return gson.fromJson(reader, type)
-            }
+        return try {
+            val ws = WorkspaceManager.getManager().getCurrent()
+            val json = ws.properties.getProperty(key) ?: return null
+            gson.fromJson(json, type)
         } catch (e: Exception) {
-            // If deserialization fails (schema change, corrupt file, etc.), back up and return null.
-            e.printStackTrace()
-            try {
-                val backup = File(file.parentFile, file.nameWithoutExtension + ".corrupt-" + System.currentTimeMillis() + ".json")
-                file.copyTo(backup, overwrite = true)
-            } catch (_: IOException) { /* ignore backup errors */ }
+            log.error("loadData: failed for key '{}'", key, e)
+            null
         }
-        return null
+    }
+
+    fun ensureBaseDir(): Boolean = true
+    fun ensureParentDir(): Boolean = true
+
+    fun ensureFile(createEmptyJson: Boolean = false, defaultProvider: (() -> T)? = null): Boolean {
+        val existing = loadData()
+        if (existing != null) return true
+        return try {
+            when {
+                defaultProvider != null -> { saveData(defaultProvider()); true }
+                createEmptyJson -> { saveData(gson.fromJson("{}", type)); true }
+                else -> true
+            }
+        } catch (_: Exception) { false }
+    }
+
+    fun saveDataAtomic(data: T): Boolean {
+        return try { saveData(data); true } catch (_: Exception) { false }
+    }
+
+    fun loadOrCreate(defaultProvider: () -> T): T {
+        return loadData() ?: defaultProvider().also { saveData(it) }
+    }
+
+    fun loadOrDefault(defaultValue: T): T {
+        return loadData() ?: defaultValue
+    }
+
+    fun touch(): Boolean = true
+    fun exists(): Boolean = loadData() != null
+    fun delete(): Boolean {
+        return try {
+            val ws = WorkspaceManager.getManager().getCurrent()
+            val removed = ws.properties.remove(key) != null
+            if (removed) {
+                ws.save(); WorkspaceManager.save(ws)
+            }
+            removed
+        } catch (_: Exception) { false }
+    }
+
+    fun appendLine(text: String, addNewline: Boolean = true): Boolean {
+        // For logs, append to ~/.botwithus/logs/<fileName>
+        return try {
+            val logsDir = File(System.getProperty("user.home"), ".botwithus/logs")
+            if (!logsDir.exists()) logsDir.mkdirs()
+            val logFile = File(logsDir, fileName)
+            logFile.parentFile?.mkdirs()
+            logFile.appendText(if (addNewline) "$text\n" else text)
+            true
+        } catch (_: Exception) { false }
+    }
+
+    companion object {
+        fun forLog(scriptName: String): Persistence<String> {
+            return Persistence("$scriptName.log", String::class.java)
+        }
     }
 }
