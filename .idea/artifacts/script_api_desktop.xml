@@ -1,8 +1,6 @@
 <component name="ArtifactManager">
   <artifact type="jar" name="script-api-desktop">
     <output-path>$PROJECT_DIR$/script-api/build/libs</output-path>
-    <root id="archive" name="script-api-desktop.jar">
-      <element id="module-output" name="UberChop.script-api.desktopMain" />
-    </root>
+    <root id="archive" name="script-api-desktop.jar" />
   </artifact>
 </component>

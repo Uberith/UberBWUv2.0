@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="CompilerConfiguration">
-    <bytecodeTargetLevel target="21">
+    <bytecodeTargetLevel target="24">
       <module name="UberBWUv2.0.SkillingScripts.main" target="21" />
       <module name="UberBWUv2.0.SkillingScripts.test" target="21" />
+      <module name="UberChop.script-api" target="24" />
+      <module name="UberChop.script-api.desktopMain" target="24" />
+      <module name="UberChop.script-api.desktopTest" target="24" />
     </bytecodeTargetLevel>
   </component>
 </project>
