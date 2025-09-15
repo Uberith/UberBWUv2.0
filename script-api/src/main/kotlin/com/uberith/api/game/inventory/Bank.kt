@@ -485,9 +485,30 @@ object Bank {
         logger.info("[Bank] deposit(query): result size={}", rs.size())
         if (rs.size() == 0) {
             val probe = ComponentQuery.newQuery(INTERFACE_INDEX).results()
-            logger.info("[Bank] deposit(query): iface {} total comps={} (sample up to 5 ids={})", INTERFACE_INDEX, probe.size(), probe.stream().limit(5).map { it.componentId }.toList())
+            logger.info(
+                "[Bank] deposit(query): iface {} total comps={} (sample up to 5 ids={})",
+                INTERFACE_INDEX, probe.size(), probe.stream().limit(5).map { it.componentId }.toList()
+            )
         }
-        val item = rs.first()
+        var item = rs.first()
+        // If the resolved component does not expose Deposit actions, retarget to one that does
+        if (item != null) {
+            val opts = try { item.options } catch (_: Throwable) { null }
+            val hasDeposit = opts != null && (opts.contains("Deposit-All") || opts.contains("Deposit-1") || opts.any { it?.startsWith("Deposit") == true })
+            if (!hasDeposit) {
+                val alt = try {
+                    ComponentQuery.newQuery(INTERFACE_INDEX)
+                        .itemId(item.itemId)
+                        .option("Deposit-All", "Deposit-1")
+                        .results()
+                        .first()
+                } catch (_: Throwable) { null }
+                if (alt != null) {
+                    logger.info("[Bank] deposit(query): retargeted to deposit-capable component for itemId={} (compId={})", item.itemId, alt.componentId)
+                    item = alt
+                }
+            }
+        }
         val ok = deposit(script, item, option)
         logger.info("[Bank] deposit(query, option={}): end -> {}", option, ok)
         return ok
@@ -506,7 +527,24 @@ object Bank {
             val probe = ComponentQuery.newQuery(INTERFACE_INDEX).results()
             logger.info("[Bank] depositAll(query): iface {} total comps={} (sample up to 5 ids={})", INTERFACE_INDEX, probe.size(), probe.stream().limit(5).map { it.componentId }.toList())
         }
-        val item = rs.first()
+        var item = rs.first()
+        if (item != null) {
+            val opts = try { item.options } catch (_: Throwable) { null }
+            val hasDeposit = opts != null && (opts.contains("Deposit-All") || opts.contains("Deposit-1") || opts.any { it?.startsWith("Deposit") == true })
+            if (!hasDeposit) {
+                val alt = try {
+                    ComponentQuery.newQuery(INTERFACE_INDEX)
+                        .itemId(item.itemId)
+                        .option("Deposit-All", "Deposit-1")
+                        .results()
+                        .first()
+                } catch (_: Throwable) { null }
+                if (alt != null) {
+                    logger.info("[Bank] depositAll(query): retargeted to deposit-capable component for itemId={} (compId={})", item.itemId, alt.componentId)
+                    item = alt
+                }
+            }
+        }
         val ok = deposit(script, item, 1)
         logger.info("[Bank] depositAll(query): end -> {}", ok)
         return ok
@@ -567,10 +605,14 @@ object Bank {
         logger.info("[Bank] depositAll(names): resolved ids={} (count={})", ids, ids.size)
         var allOk = true
         for (id in ids) {
-            var ok = depositAll(script, ComponentQuery.newQuery(517).id(COMPONENT_INDEX).itemId(id))
+            var ok = depositAll(script, ComponentQuery.newQuery(INTERFACE_INDEX).itemId(id).option("Deposit-All", "Deposit-1"))
             if (!ok) {
                 logger.info("[Bank] depositAll(names): bank component not found; fallback to backpack for id={}", id)
-                ok = Backpack.interact("Deposit-All", id) || Backpack.interact("Deposit-1", id)
+                ok = Backpack.interact("Deposit-All", id)
+                        || Backpack.interact("Deposit-all", id)
+                        || Backpack.interact("Deposit all", id)
+                        || Backpack.interact("Deposit-1", id)
+                        || Backpack.interact("Deposit 1", id)
             }
             logger.info("[Bank] depositAll(names): id={} -> {}", id, ok)
             allOk = allOk && ok
@@ -588,10 +630,14 @@ object Bank {
         logger.info("[Bank] depositAll(ids): resolved ids={} (count={})", ids, ids.size)
         var allOk = true
         for (id in ids) {
-            var ok = depositAll(script, ComponentQuery.newQuery(517).id(COMPONENT_INDEX).itemId(id))
+            var ok = depositAll(script, ComponentQuery.newQuery(INTERFACE_INDEX).itemId(id).option("Deposit-All", "Deposit-1"))
             if (!ok) {
                 logger.info("[Bank] depositAll(ids): bank component not found; fallback to backpack for id={}", id)
-                ok = Backpack.interact("Deposit-All", id) || Backpack.interact("Deposit-1", id)
+                ok = Backpack.interact("Deposit-All", id)
+                        || Backpack.interact("Deposit-all", id)
+                        || Backpack.interact("Deposit all", id)
+                        || Backpack.interact("Deposit-1", id)
+                        || Backpack.interact("Deposit 1", id)
             }
             logger.info("[Bank] depositAll(ids): id={} -> {}", id, ok)
             allOk = allOk && ok
@@ -609,10 +655,14 @@ object Bank {
         logger.info("[Bank] depositAll(patterns): resolved ids={} (count={})", ids, ids.size)
         var allOk = true
         for (id in ids) {
-            var ok = depositAll(script, ComponentQuery.newQuery(517).id(COMPONENT_INDEX).itemId(id))
+            var ok = depositAll(script, ComponentQuery.newQuery(INTERFACE_INDEX).itemId(id).option("Deposit-All", "Deposit-1"))
             if (!ok) {
                 logger.info("[Bank] depositAll(patterns): bank component not found; fallback to backpack for id={}", id)
-                ok = Backpack.interact("Deposit-All", id) || Backpack.interact("Deposit-1", id)
+                ok = Backpack.interact("Deposit-All", id)
+                        || Backpack.interact("Deposit-all", id)
+                        || Backpack.interact("Deposit all", id)
+                        || Backpack.interact("Deposit-1", id)
+                        || Backpack.interact("Deposit 1", id)
             }
             logger.info("[Bank] depositAll(patterns): id={} -> {}", id, ok)
             allOk = allOk && ok
