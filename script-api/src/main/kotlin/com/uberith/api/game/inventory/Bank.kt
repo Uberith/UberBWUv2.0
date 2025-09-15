@@ -494,14 +494,17 @@ object Bank {
         // If the resolved component does not expose Deposit actions, retarget to one that does
         if (item != null) {
             val opts = try { item.options } catch (_: Throwable) { null }
-            val hasDeposit = opts != null && (opts.contains("Deposit-All") || opts.contains("Deposit-1") || opts.any { it?.startsWith("Deposit") == true })
-            if (!hasDeposit) {
+            val hasDeposit = opts != null && opts.any { it?.contains("Deposit", true) == true }
+            val hasWithdraw = opts != null && opts.any { it?.contains("Withdraw", true) == true }
+            if (!hasDeposit || hasWithdraw) {
                 val alt = try {
                     ComponentQuery.newQuery(INTERFACE_INDEX)
                         .itemId(item.itemId)
-                        .option("Deposit-All", "Deposit-1")
                         .results()
-                        .first()
+                        .firstOrNull { c ->
+                            val o = try { c.options } catch (_: Throwable) { null }
+                            o != null && o.any { it?.contains("Deposit", true) == true } && !o.any { it?.contains("Withdraw", true) == true }
+                        }
                 } catch (_: Throwable) { null }
                 if (alt != null) {
                     logger.info("[Bank] deposit(query): retargeted to deposit-capable component for itemId={} (compId={})", item.itemId, alt.componentId)
@@ -530,14 +533,17 @@ object Bank {
         var item = rs.first()
         if (item != null) {
             val opts = try { item.options } catch (_: Throwable) { null }
-            val hasDeposit = opts != null && (opts.contains("Deposit-All") || opts.contains("Deposit-1") || opts.any { it?.startsWith("Deposit") == true })
-            if (!hasDeposit) {
+            val hasDeposit = opts != null && opts.any { it?.contains("Deposit", true) == true }
+            val hasWithdraw = opts != null && opts.any { it?.contains("Withdraw", true) == true }
+            if (!hasDeposit || hasWithdraw) {
                 val alt = try {
                     ComponentQuery.newQuery(INTERFACE_INDEX)
                         .itemId(item.itemId)
-                        .option("Deposit-All", "Deposit-1")
                         .results()
-                        .first()
+                        .firstOrNull { c ->
+                            val o = try { c.options } catch (_: Throwable) { null }
+                            o != null && o.any { it?.contains("Deposit", true) == true } && !o.any { it?.contains("Withdraw", true) == true }
+                        }
                 } catch (_: Throwable) { null }
                 if (alt != null) {
                     logger.info("[Bank] depositAll(query): retargeted to deposit-capable component for itemId={} (compId={})", item.itemId, alt.componentId)
@@ -571,16 +577,16 @@ object Bank {
         }
         val opts = try { comp.options } catch (_: Throwable) { null }
         logger.info("[Bank] deposit(comp, option={}): compId={}, opts={} ", option, comp.componentId, opts)
-        val ok = when {
-            opts != null && opts.contains("Deposit-All") -> {
-                logger.info("[Bank] deposit(comp): using action 'Deposit-All'")
-                comp.interact("Deposit-All") > 0
+        val ok = run {
+            val chosen = opts?.let {
+                // Prefer an option that contains both Deposit and All, else any Deposit option
+                it.firstOrNull { s -> s?.contains("Deposit", true) == true && s?.contains("All", true) == true }
+                    ?: it.firstOrNull { s -> s?.contains("Deposit", true) == true }
             }
-            opts != null && opts.contains("Deposit") -> {
-                logger.info("[Bank] deposit(comp): using action 'Deposit'")
-                comp.interact("Deposit") > 0
-            }
-            else -> {
+            if (chosen != null) {
+                logger.info("[Bank] deposit(comp): using action '{}'", chosen)
+                comp.interact(chosen) > 0
+            } else {
                 logger.info("[Bank] deposit(comp): using option index {}", option)
                 comp.interact(option) > 0
             }
@@ -1000,22 +1006,123 @@ object Bank {
     /** Suspendable counterpart to [depositAll] by regex patterns. */
     suspend fun depositAll(script: SuspendableScript, vararg patterns: Pattern): Boolean {
         logger.info("[Bank] suspend depositAll(patterns): begin patternsCount={}", patterns.size)
-        val ids = InventoryItemQuery.newQuery(93).name(*patterns).results().stream()
-            .map { it.id }.distinct().toList()
+        // Resolve by backpack item ids using ConfigManager names (backpack item.name may be blank while bank is open)
+        val ids = try {
+            val inv = Backpack.getInventory()
+            val items = inv?.items ?: emptyList()
+            items.stream()
+                .filter { it.id != -1 }
+                .filter { i ->
+                    val name = try { net.botwithus.rs3.cache.assets.ConfigManager.getItemProvider().provide(i.id).name } catch (_: Throwable) { "" }
+                    patterns.any { p -> p.matcher(name ?: "").find() }
+                }
+                .map { it.id }
+                .distinct()
+                .toList()
+        } catch (_: Throwable) { emptyList<Int>() }
         logger.info("[Bank] suspend depositAll(patterns): resolved ids={} (count={})", ids, ids.size)
         var allOk = true
-        for (id in ids) {
-            var ok = depositAll(script, ComponentQuery.newQuery(517).id(COMPONENT_INDEX).itemId(id))
-            if (!ok) {
-                logger.info("[Bank] suspend depositAll(patterns): bank component not found; fallback to backpack for id={}", id)
-                ok = Backpack.interact("Deposit-All", id) || Backpack.interact("Deposit-1", id)
-                if (ok) script.awaitTicks(1)
+        if (ids.isNotEmpty()) {
+            for (id in ids) {
+                var ok = depositAll(script, ComponentQuery.newQuery(INTERFACE_INDEX).itemId(id))
+                if (!ok) {
+                    logger.info("[Bank] suspend depositAll(patterns): bank component not found; fallback to backpack for id={}", id)
+                    ok = Backpack.interact("Deposit-All", id)
+                            || Backpack.interact("Deposit-all", id)
+                            || Backpack.interact("Deposit all", id)
+                            || Backpack.interact("Deposit-1", id)
+                            || Backpack.interact("Deposit 1", id)
+                    if (ok) script.awaitTicks(1)
+                }
+                logger.info("[Bank] suspend depositAll(patterns): id={} -> {}", id, ok)
+                allOk = allOk && ok
             }
-            logger.info("[Bank] suspend depositAll(patterns): id={} -> {}", id, ok)
+            logger.info("[Bank] suspend depositAll(patterns): end -> {}", allOk)
+            return allOk
+        }
+
+        // Heuristic fallback for common log item ids when names are unavailable
+        val logsPatternRequested = patterns.any { it.pattern().contains("logs", ignoreCase = true) }
+        if (logsPatternRequested) {
+            val commonLogIds = setOf(1511, 1513, 1515, 1517, 1519, 1521) // normal, magic, yew, maple, willow, oak (OSRS/RS3 common ids)
+            val inv = try { Backpack.getInventory() } catch (_: Throwable) { null }
+            val items = inv?.items ?: emptyList()
+            val fallbackIds = items.map { it.id }.filter { it in commonLogIds }.distinct()
+            logger.info("[Bank] suspend depositAll(patterns): logs-heuristic ids={} (count={})", fallbackIds, fallbackIds.size)
+            if (fallbackIds.isNotEmpty()) {
+                for (id in fallbackIds) {
+                    var ok = depositAll(script, ComponentQuery.newQuery(INTERFACE_INDEX).itemId(id))
+                    if (!ok) {
+                        ok = Backpack.interact("Deposit-All", id)
+                                || Backpack.interact("Deposit-all", id)
+                                || Backpack.interact("Deposit all", id)
+                                || Backpack.interact("Deposit-1", id)
+                                || Backpack.interact("Deposit 1", id)
+                        if (ok) script.awaitTicks(1)
+                    }
+                    logger.info("[Bank] suspend depositAll(patterns): logs-heuristic id={} -> {}", id, ok)
+                    allOk = allOk && ok
+                }
+                logger.info("[Bank] suspend depositAll(patterns): end (logs-heuristic) -> {}", allOk)
+                return allOk
+            }
+        }
+
+        // Diagnostics: log a small sample of backpack item ids->names when no ids resolved
+        try {
+            val inv = Backpack.getInventory()
+            val items = inv?.items ?: emptyList()
+            val samples = items.filter { it.id != -1 }
+                .map {
+                    val nm = try { net.botwithus.rs3.cache.assets.ConfigManager.getItemProvider().provide(it.id).name } catch (_: Throwable) { "" }
+                    "${it.id}:${nm}"
+                }
+                .take(10)
+            logger.info("[Bank] suspend depositAll(patterns): backpack sample (id:name) -> {}", samples)
+        } catch (_: Throwable) { }
+
+        // Fallback: derive targets directly from bank interface components by itemName
+        val bankTargets = try {
+            ComponentQuery.newQuery(INTERFACE_INDEX)
+                .results()
+                .toList()
+                .filter { c ->
+                    val opts = try { c.options } catch (_: Throwable) { null }
+                    val depositable = opts != null && opts.any { it?.contains("Deposit", true) == true } && !opts.any { it?.contains("Withdraw", true) == true }
+                    if (!depositable) return@filter false
+                    val itemName = try {
+                        net.botwithus.rs3.cache.assets.ConfigManager.getItemProvider().provide(c.itemId).name
+                    } catch (_: Throwable) { null }
+                    val nameMatches = itemName != null && patterns.any { p -> p.matcher(itemName).find() }
+                    val logsHeuristic = logsPatternRequested && c.itemId in setOf(1511, 1513, 1515, 1517, 1519, 1521)
+                    nameMatches || logsHeuristic
+                }
+        } catch (_: Throwable) { emptyList() }
+
+        logger.info("[Bank] suspend depositAll(patterns): bank-fallback targets={} ", bankTargets.size)
+        if (bankTargets.isEmpty()) {
+            // Log a compact summary of any deposit-capable comps for debugging
+            try {
+                val all = ComponentQuery.newQuery(INTERFACE_INDEX).results().toList()
+                val depositables = all.filter { c ->
+                    val o = try { c.options } catch (_: Throwable) { null }
+                    o != null && o.any { it?.contains("Deposit", true) == true }
+                }
+                val sample = depositables.take(10).map { c ->
+                    val nm = try { net.botwithus.rs3.cache.assets.ConfigManager.getItemProvider().provide(c.itemId).name } catch (_: Throwable) { "" }
+                    val opts = try { c.options } catch (_: Throwable) { null }
+                    "${c.componentId}:${c.itemId}:${nm}:${opts}"
+                }
+                logger.info("[Bank] suspend depositAll(patterns): depositable comps sample compId:itemId:name:options -> {}", sample)
+            } catch (_: Throwable) { }
+        }
+        for (comp in bankTargets) {
+            val ok = deposit(script, comp, 1)
+            logger.info("[Bank] suspend depositAll(patterns): bank-fallback compId={} -> {}", comp.componentId, ok)
             allOk = allOk && ok
         }
-        logger.info("[Bank] suspend depositAll(patterns): end -> {}", allOk && ids.isNotEmpty())
-        return allOk && ids.isNotEmpty()
+        logger.info("[Bank] suspend depositAll(patterns): end (bank-fallback) -> {}", allOk && bankTargets.isNotEmpty())
+        return allOk && bankTargets.isNotEmpty()
     }
 
     /**

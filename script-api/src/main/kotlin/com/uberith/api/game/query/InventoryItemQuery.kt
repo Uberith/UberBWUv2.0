@@ -77,7 +77,7 @@ class InventoryItemQuery(vararg inventoryIds: Int) : Query<InventoryItem> {
         val prev = root
         root = Predicate { t ->
             val nm = t.name ?: ""
-            prev.test(t) && pattern.matcher(nm).matches()
+            prev.test(t) && pattern.matcher(nm).find()
         }
         return this
     }
@@ -88,7 +88,7 @@ class InventoryItemQuery(vararg inventoryIds: Int) : Query<InventoryItem> {
         val prev = root
         root = Predicate { t ->
             val nm = t.name ?: ""
-            prev.test(t) && patterns.any { p -> p.matcher(nm).matches() }
+            prev.test(t) && patterns.any { p -> p.matcher(nm).find() }
         }
         return this
     }
