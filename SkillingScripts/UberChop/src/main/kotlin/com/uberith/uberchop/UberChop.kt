@@ -1,8 +1,7 @@
 package com.uberith.uberchop
 
 import com.uberith.api.SuspendableScript
-import com.uberith.api.utils.Persistence
-import com.google.gson.reflect.TypeToken
+import com.example.config.ConfigService
 import com.uberith.api.game.inventory.Backpack
 import com.uberith.api.game.inventory.Bank
 import com.uberith.api.game.skills.woodcutting.Trees
@@ -25,131 +24,8 @@ import kotlin.random.Random
     author = "Uberith"
 )
 class UberChop : SuspendableScript() {
-    // Persistence for user settings
-    private val settingsPersistence = Persistence<Settings>("UberChop.json", object : TypeToken<Settings>() {}.type)
-
-    // Ensure persistence directory/file is initialized as soon as the script is constructed
-    init {
-        try {
-            ensurePersistenceInitialized()
-        } catch (_: Throwable) { }
-    }
-
-    fun ensurePersistenceInitialized() {
-        // Ensure base directory exists
-        val dir = settingsPersistence.location.parentFile
-        val localLog = Persistence.forLog("UberChop")
-        try {
-            val dirOk = settingsPersistence.ensureBaseDir()
-            val msg = "Init persistence: ensureBaseDir dir='${dir?.absolutePath}' ok=${dirOk}"
-            logger.info(msg)
-            localLog.appendLine(msg)
-            if (!dirOk) localLog.appendLine("Init persistence: base dir creation failed for '${dir?.absolutePath}'")
-        } catch (e: Throwable) {
-            logger.error("Init persistence: exception ensuring base dir '{}'", dir?.absolutePath, e)
-            localLog.appendLine("Init persistence: exception ensuring base dir '${dir?.absolutePath}': ${e.message}")
-        }
-        // Ensure file exists; initialize with current in-memory defaults if missing
-        try {
-            val fileOk = settingsPersistence.ensureFile(defaultProvider = { settings })
-            val exists = settingsPersistence.location.exists()
-            val msg = "Init persistence: ensureFile path='${settingsPersistence.location.absolutePath}' ok=${fileOk} exists=${exists}"
-            logger.info(msg)
-            localLog.appendLine(msg)
-            if (!fileOk) localLog.appendLine("Init persistence: failed to create settings file at '${settingsPersistence.location.absolutePath}'")
-        } catch (e: Throwable) {
-            logger.error("Init persistence: exception creating settings file '{}'", settingsPersistence.location.absolutePath, e)
-            localLog.appendLine("Init persistence: exception creating settings file '${settingsPersistence.location.absolutePath}': ${e.message}")
-        }
-    }
-
-    // Load settings from disk (if present) into the current settings instance
-    private fun loadSettings() {
-        val s = settingsPersistence.loadOrCreate { settings }
-        run {
-            // Break handler
-            settings.performRandomBreak = s.performRandomBreak
-            settings.breakFrequency = s.breakFrequency
-            settings.minBreak = s.minBreak
-            settings.maxBreak = s.maxBreak
-
-            // Logout handler
-            settings.logoutDurationEnable = s.logoutDurationEnable
-            settings.logoutHours = s.logoutHours
-            settings.logoutMinutes = s.logoutMinutes
-            settings.logoutSeconds = s.logoutSeconds
-
-            // AFK handler
-            settings.enableAfk = s.enableAfk
-            settings.afkEveryMin = s.afkEveryMin
-            settings.afkEveryMax = s.afkEveryMax
-            settings.afkDurationMin = s.afkDurationMin
-            settings.afkDurationMax = s.afkDurationMax
-
-            // Auto-Stop handler
-            settings.enableAutoStop = s.enableAutoStop
-            settings.stopAfterHours = s.stopAfterHours
-            settings.stopAfterMinutes = s.stopAfterMinutes
-            settings.stopAfterXp = s.stopAfterXp
-            settings.stopAfterLogs = s.stopAfterLogs
-
-            // Extra features
-            settings.pickupNests = s.pickupNests
-            settings.enableTreeRotation = s.enableTreeRotation
-
-            // Control
-            settings.enableWorldHopping = s.enableWorldHopping
-            settings.useMagicNotepaper = s.useMagicNotepaper
-            settings.useCrystallise = s.useCrystallise
-            settings.useJujuPotions = s.useJujuPotions
-
-            // Auto-skill
-            settings.autoProgressTree = s.autoProgressTree
-            settings.autoUpgradeTree = s.autoUpgradeTree
-            settings.tanningProductIndex = s.tanningProductIndex
-
-            // World hopping filters
-            settings.minPing = s.minPing
-            settings.maxPing = s.maxPing
-            settings.minPopulation = s.minPopulation
-            settings.maxPopulation = s.maxPopulation
-            settings.hopDelayMs = s.hopDelayMs
-            settings.memberOnlyWorlds = s.memberOnlyWorlds
-            settings.onlyFreeToPlay = s.onlyFreeToPlay
-            settings.hopOnChat = s.hopOnChat
-            settings.hopOnCrowd = s.hopOnCrowd
-            settings.playerThreshold = s.playerThreshold
-            settings.hopOnNoTrees = s.hopOnNoTrees
-
-            // Last used
-            settings.savedTreeType = s.savedTreeType
-            settings.savedLocation = s.savedLocation
-            settings.logHandlingMode = s.logHandlingMode
-
-            // Items
-            settings.withdrawWoodBox = s.withdrawWoodBox
-
-            // Custom per-location and deposit filters
-            settings.customLocations.clear(); settings.customLocations.putAll(s.customLocations)
-            settings.depositInclude.clear(); settings.depositInclude.addAll(s.depositInclude)
-            settings.depositKeep.clear(); settings.depositKeep.addAll(s.depositKeep)
-        }
-    }
-
-    // Persist current settings to disk
-    fun saveSettings(s: Settings = settings) {
-        // Ensure saved tree and location reflect current selections
-        val idx = com.uberith.uberchop.TreeTypes.ALL.indexOf(targetTree)
-        if (idx >= 0) s.savedTreeType = idx
-        s.savedLocation = location
-        // Safer write using atomic replace
-        settingsPersistence.saveDataAtomic(s)
-        try {
-            logger.info("Settings saved to {}", settingsPersistence.location.absolutePath)
-        } catch (_: Throwable) { }
-    }
     // Minimal public fields still referenced by the GUI
-    val settings = Settings()
+    var settings = Settings()
     var targetTree: String = "Tree"
     var location: String = ""
     var bankWhenFull: Boolean = false
@@ -161,16 +37,37 @@ class UberChop : SuspendableScript() {
     private var totalRuntimeMs: Long = 0L
     private var lastRuntimeUpdateMs: Long = 0L
     var WCLevel = Stats.WOODCUTTING.currentLevel
+    // Simplified persistence wiring
+    private val configService = ConfigService()
+    private val settingsStore = SettingsStore(configService)
+    private var activeProfile: String = "default"
 
+    private fun applySettings(s: Settings) {
+        settings = s
+    }
+
+    private fun ensurePersistenceInitialized() {
+        // Ensure active profile is sane and directories exist
+        activeProfile = configService.ensureProfileName(activeProfile)
+        try { configService.getWorkspaceDir() } catch (_: Throwable) { }
+    }
+
+    private fun loadSettings() {
+        try {
+            applySettings(settingsStore.load(activeProfile, settings))
+        } catch (_: Throwable) { }
+    }
+
+    fun onSettingsChanged() {
+        // Persist immediately in a simple, reliable way
+        try { settingsStore.save(activeProfile, settings) } catch (_: Throwable) { }
+    }
     
 
     override fun onActivation() {
-        try {
-            ensurePersistenceInitialized()
-        } catch (_: Throwable) { }
 
-        // Load persisted settings before reading them
-        loadSettings()
+        // Load persisted settings and apply to in-memory instance
+        try { applySettings(settingsStore.load(activeProfile, settings)) } catch (_: Throwable) { }
         val idx = settings.savedTreeType.coerceIn(0, TreeTypes.ALL.size - 1)
         targetTree = TreeTypes.ALL[idx]
         // Initialize location from saved preference if valid for current tree
@@ -185,8 +82,7 @@ class UberChop : SuspendableScript() {
             else validForTree.firstOrNull()?.name ?: treeLocations.firstOrNull()?.name.orEmpty()
         settings.savedLocation = location
         logger.info("Activated: tree='$targetTree', location='$location' (locations=${treeLocations.size})")
-        // Persist initial selections so a config file is created even before any UI changes
-        saveSettings()
+        // No immediate save; debounced writes occur on setting changes.
         status = "Active - Preparing"
         phase = Phase.PREPARING
         // sync cached flags from settings
@@ -196,20 +92,13 @@ class UberChop : SuspendableScript() {
     }
 
     override fun onDeactivation() {
-        // Save settings on deactivation for good measure
-        saveSettings()
         status = "Inactive"
         phase = Phase.READY
         logger.info("Deactivated")
     }
 
     override suspend fun onLoop() {
-        try {
-            ensurePersistenceInitialized()
-        } catch (_: Throwable) { }
-
-        // Load persisted settings before reading them
-        loadSettings()
+        // No read-from-disk here; the GUI and activation steps manage state.
         val now = System.currentTimeMillis()
         if (lastRuntimeUpdateMs != 0L) totalRuntimeMs += (now - lastRuntimeUpdateMs)
         lastRuntimeUpdateMs = now

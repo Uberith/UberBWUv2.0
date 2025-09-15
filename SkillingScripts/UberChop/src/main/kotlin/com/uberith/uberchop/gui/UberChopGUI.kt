@@ -723,7 +723,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                     script.settings.savedTreeType = e.idx
                     script.targetTree = e.name
                     treeChanged = true
-                    script.saveSettings(script.settings)
+                    script.onSettingsChanged()
                 }
             }
             ImGui.endCombo()
@@ -742,7 +742,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             val fallback = filtered.firstOrNull()?.name ?: script.treeLocations.firstOrNull()?.name ?: ""
             script.location = fallback
             script.settings.savedLocation = fallback
-            script.saveSettings(script.settings)
+            script.onSettingsChanged()
         }
         val locationNames = filtered.map { it.name }
         val curLocName = script.location
@@ -756,7 +756,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                 if (ImGui.selectable(locationNames[i], isSelected, 0, 0f, 0f)) {
                     script.location = locationNames[i]
                     script.settings.savedLocation = script.location
-                    script.saveSettings(script.settings)
+                    script.onSettingsChanged()
                 }
             }
             ImGui.endCombo()
@@ -794,7 +794,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                     val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
                     cur.chopX = x; cur.chopY = y; cur.chopZ = z
                     map[curLoc] = cur
-                    script.saveSettings(script.settings)
+                    script.onSettingsChanged()
                 }
             }
             ImGui.sameLine(0f, 6f)
@@ -812,7 +812,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                         val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
                         cur.chopX = x.toInt(); cur.chopY = y.toInt(); cur.chopZ = z.toInt()
                         map[curLoc] = cur
-                        script.saveSettings(script.settings)
+                        script.onSettingsChanged()
                     }
                 } catch (_: Throwable) { }
             }
@@ -833,7 +833,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                     val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
                     cur.bankX = x; cur.bankY = y; cur.bankZ = z
                     map[curLoc] = cur
-                    script.saveSettings(script.settings)
+                    script.onSettingsChanged()
                 }
             }
             ImGui.sameLine(0f, 6f)
@@ -851,7 +851,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                         val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
                         cur.bankX = x.toInt(); cur.bankY = y.toInt(); cur.bankZ = z.toInt()
                         map[curLoc] = cur
-                        script.saveSettings(script.settings)
+                        script.onSettingsChanged()
                     }
                 } catch (_: Throwable) { }
             }
@@ -956,7 +956,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             val v = ImGui.checkbox("Withdraw Wood Box", old)
             if (v != old) { script.settings.withdrawWoodBox = v; changed = true }
         }
-        if (changed) script.saveSettings(script.settings)
+        if (changed) script.onSettingsChanged()
     }
 
     // --- Helpers for Overview readiness ---
@@ -1138,7 +1138,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             if (v != old) { script.settings.stopAfterLogs = v; changed = true }
         }
 
-        if (changed) script.saveSettings(script.settings)
+        if (changed) script.onSettingsChanged()
     }
 
     private fun drawWorldHop() {
@@ -1199,7 +1199,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             val v = ImGui.checkbox("Hop On No Trees", old)
             if (v != old) { script.settings.hopOnNoTrees = v; changed = true }
         }
-        if (changed) script.saveSettings(script.settings)
+        if (changed) script.onSettingsChanged()
     }
 
     private fun drawAdvanced() {
@@ -1207,7 +1207,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         run {
             val old = script.settings.savedTreeType
             val v = adjustInt("Saved Tree Type", old, 0, 50, 1)
-            if (v != old) { script.settings.savedTreeType = v; script.saveSettings(script.settings) }
+            if (v != old) { script.settings.savedTreeType = v; script.onSettingsChanged() }
         }
         ImGui.text("Saved Location: ${script.settings.savedLocation}")
         ImGui.separator()
@@ -1244,7 +1244,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                     val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
                     cur.chopX = x.toInt(); cur.chopY = y.toInt(); cur.chopZ = z.toInt()
                     map[curLoc] = cur
-                    script.saveSettings(script.settings)
+                    script.onSettingsChanged()
                 }
             } catch (_: Throwable) {}
         }
@@ -1253,7 +1253,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             val map = script.settings.customLocations
             val cur = map[curLoc]
             if (cur != null) { cur.chopX = null; cur.chopY = null; cur.chopZ = null; if (cur.bankX==null && cur.bankY==null && cur.bankZ==null) map.remove(curLoc) else map[curLoc]=cur }
-            script.saveSettings(script.settings)
+            script.onSettingsChanged()
         }
         if (ImGui.button("Set Bank Tile", 120f, 0f)) {
             try {
@@ -1268,7 +1268,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                     val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
                     cur.bankX = x.toInt(); cur.bankY = y.toInt(); cur.bankZ = z.toInt()
                     map[curLoc] = cur
-                    script.saveSettings(script.settings)
+                    script.onSettingsChanged()
                 }
             } catch (_: Throwable) {}
         }
@@ -1277,19 +1277,19 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             val map = script.settings.customLocations
             val cur = map[curLoc]
             if (cur != null) { cur.bankX = null; cur.bankY = null; cur.bankZ = null; if (cur.chopX==null && cur.chopY==null && cur.chopZ==null) map.remove(curLoc) else map[curLoc]=cur }
-            script.saveSettings(script.settings)
+            script.onSettingsChanged()
         }
         ImGui.separator()
         ImGui.text("Deposit Filters")
         ImGui.text("Include: ${script.settings.depositInclude.size}  |  Keep: ${script.settings.depositKeep.size}")
-        if (ImGui.button("Add Blossom", 110f, 0f)) { if (!script.settings.depositInclude.contains("Crystal tree blossom")) { script.settings.depositInclude.add("Crystal tree blossom"); script.saveSettings(script.settings) } }
+        if (ImGui.button("Add Blossom", 110f, 0f)) { if (!script.settings.depositInclude.contains("Crystal tree blossom")) { script.settings.depositInclude.add("Crystal tree blossom"); script.onSettingsChanged() } }
         ImGui.sameLine(0f, 6f)
-        if (ImGui.button("Add Bamboo", 110f, 0f)) { if (!script.settings.depositInclude.contains("Bamboo")) { script.settings.depositInclude.add("Bamboo"); script.saveSettings(script.settings) } }
+        if (ImGui.button("Add Bamboo", 110f, 0f)) { if (!script.settings.depositInclude.contains("Bamboo")) { script.settings.depositInclude.add("Bamboo"); script.onSettingsChanged() } }
         ImGui.sameLine(0f, 6f)
-        if (ImGui.button("Keep Nests", 110f, 0f)) { if (!script.settings.depositKeep.contains("Bird's nest")) { script.settings.depositKeep.add("Bird's nest"); script.saveSettings(script.settings) } }
-        if (ImGui.button("Clear Include", 110f, 0f)) { script.settings.depositInclude.clear(); script.saveSettings(script.settings) }
+        if (ImGui.button("Keep Nests", 110f, 0f)) { if (!script.settings.depositKeep.contains("Bird's nest")) { script.settings.depositKeep.add("Bird's nest"); script.onSettingsChanged() } }
+        if (ImGui.button("Clear Include", 110f, 0f)) { script.settings.depositInclude.clear(); script.onSettingsChanged() }
         ImGui.sameLine(0f, 6f)
-        if (ImGui.button("Clear Keep", 110f, 0f)) { script.settings.depositKeep.clear(); script.saveSettings(script.settings) }
+        if (ImGui.button("Clear Keep", 110f, 0f)) { script.settings.depositKeep.clear(); script.onSettingsChanged() }
         ImGui.sameLine(0f, 6f)
         if (ImGui.button("Add From Clipboard", 160f, 0f)) {
             try {
@@ -1297,7 +1297,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                 val data = cb.getData(java.awt.datatransfer.DataFlavor.stringFlavor) as? String
                 val text = data?.trim()
                 if (!text.isNullOrEmpty()) {
-                    if (!script.settings.depositInclude.contains(text)) { script.settings.depositInclude.add(text); script.saveSettings(script.settings) }
+                    if (!script.settings.depositInclude.contains(text)) { script.settings.depositInclude.add(text); script.onSettingsChanged() }
                 }
             } catch (_: Throwable) { }
         }
@@ -1310,7 +1310,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                 val name = iter.next()
                 ImGui.text(name)
                 ImGui.sameLine(0f, 8f)
-                if (ImGui.button("x##inc_$idx", 20f, 0f)) { iter.remove(); script.saveSettings(script.settings) }
+                if (ImGui.button("x##inc_$idx", 20f, 0f)) { iter.remove(); script.onSettingsChanged() }
                 idx++
             }
         }
@@ -1324,7 +1324,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                 val name = iterK.next()
                 ImGui.text(name)
                 ImGui.sameLine(0f, 8f)
-                if (ImGui.button("x##keep_$k", 20f, 0f)) { iterK.remove(); script.saveSettings(script.settings) }
+                if (ImGui.button("x##keep_$k", 20f, 0f)) { iterK.remove(); script.onSettingsChanged() }
                 k++
             }
             if (ImGui.button("Add Keep From Clipboard", 200f, 0f)) {
@@ -1332,7 +1332,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                     val cb = java.awt.Toolkit.getDefaultToolkit().systemClipboard
                     val data = cb.getData(java.awt.datatransfer.DataFlavor.stringFlavor) as? String
                     val text = data?.trim()
-                    if (!text.isNullOrEmpty() && !script.settings.depositKeep.contains(text)) { script.settings.depositKeep.add(text); script.saveSettings(script.settings) }
+                    if (!text.isNullOrEmpty() && !script.settings.depositKeep.contains(text)) { script.settings.depositKeep.add(text); script.onSettingsChanged() }
                 } catch (_: Throwable) { }
             }
         }
@@ -1342,17 +1342,17 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         run {
             val old = script.settings.autoProgressTree
             val v = ImGui.checkbox("Auto-Progress Tree", old)
-            if (v != old) { script.settings.autoProgressTree = v; script.saveSettings(script.settings) }
+            if (v != old) { script.settings.autoProgressTree = v; script.onSettingsChanged() }
         }
         run {
             val old = script.settings.autoUpgradeTree
             val v = ImGui.checkbox("Auto-Upgrade Tree", old)
-            if (v != old) { script.settings.autoUpgradeTree = v; script.saveSettings(script.settings) }
+            if (v != old) { script.settings.autoUpgradeTree = v; script.onSettingsChanged() }
         }
         run {
             val old = script.settings.tanningProductIndex
             val v = adjustInt("Preset/Prod Index", old, 0, 20)
-            if (v != old) { script.settings.tanningProductIndex = v; script.saveSettings(script.settings) }
+            if (v != old) { script.settings.tanningProductIndex = v; script.onSettingsChanged() }
         }
     }
 
