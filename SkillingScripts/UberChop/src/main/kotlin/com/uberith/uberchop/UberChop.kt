@@ -228,11 +228,9 @@ class UberChop : SuspendableScript() {
 
         if (moveTowards(effectiveChopCoordinate(), 40, "chop tile")) return true
 
-        val tree = Trees.nearest(targetTree)
-        if (tree != null) {
-            status = "Chopping ${tree.name}"
-            logger.info("Chop target: '${tree.name}'")
-            Trees.chop(tree)
+        if (Trees.chop(targetTree).nearest()) {
+            status = "Chopping $targetTree"
+            logger.info("Chop target: '$targetTree'")
             awaitTicks(1)
             return true
         }

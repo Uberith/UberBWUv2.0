@@ -40,18 +40,42 @@ import java.util.regex.Pattern
  * Usage examples
  * ```kotlin
  * // Find the closest yew and try to chop it
- * val found = Trees.chop(TreeType.YEW)
+ * val found = Trees.chop(TreeType.YEW).nearest()
  *
  * // Suspendable usage inside a SuspendableScript
  * val ok = Trees.chop(this, TreeType.MAGIC) // yields ~2 ticks on success
  *
  * // Choose best available by level/membership
  * val best = Trees.bestFor(level = 61, isMember = true)
- * best?.let { Trees.chop(it) }
+ * best?.let { Trees.chop(it).nearest() }
  * ```
  */
 // Wrapper no longer needed; APIs now use SceneObject directly.
 
+class TreeChopRequest internal constructor(
+    private val locator: () -> SceneObject?,
+    private val interactor: (SceneObject) -> Boolean
+) {
+    /**
+     * Attempts to locate the nearest matching tree and interact with it.
+     *
+     * @return true if an interaction was issued, false if nothing matched
+     */
+    fun nearest(): Boolean {
+        val target = locator() ?: return false
+        return interactor(target)
+    }
+
+    /**
+     * Returns the nearest matching tree without interacting.
+     */
+    fun nearestObject(): SceneObject? = locator()
+
+    /**
+     * Interacts with the provided [target] if it is non-null.
+     */
+    fun target(target: SceneObject?): Boolean = target?.let(interactor) ?: false
+}
 object Trees {
 
     private val logger: org.slf4j.Logger = org.slf4j.LoggerFactory.getLogger(Trees::class.java)
@@ -116,21 +140,29 @@ object Trees {
      *   or handle waiting externally.
      */
     /**
-     * Chops the nearest tree matching [type] using a preferred action.
+     * Builds a [TreeChopRequest] configured for the supplied [type].
+     *
+     * Call [TreeChopRequest.nearest] to locate and chop the closest matching tree,
+     * or [TreeChopRequest.nearestObject] if you only need the entity reference.
      *
      * @param type tree type to chop
-     * @return true if the interaction was issued
+     * @return request builder for chaining (e.g., .nearest())
      */
-    fun chop(type: TreeType): Boolean {
-        logger.info("[Trees] chop(type='{}'): begin", type.displayName)
-        val obj = nearest(type)
-        return obj?.let {
-            logger.info("[Trees] chop(type='{}'): target name='{}', typeId={}", type.displayName, it.name, it.typeId)
-            interact(it)
-        } ?: run {
-            logger.info("[Trees] chop(type='{}'): no target", type.displayName)
-            false
-        }
+    fun chop(type: TreeType): TreeChopRequest {
+        val descriptor = "type='${'$'}{type.displayName}'"
+        return TreeChopRequest(
+            locator = {
+                logger.info("[Trees] chop({}): begin", descriptor)
+                val obj = nearest(type)
+                if (obj == null) {
+                    logger.info("[Trees] chop({}): no target", descriptor)
+                } else {
+                    logger.info("[Trees] chop({}): target name='{}', typeId={}", descriptor, obj.name, obj.typeId)
+                }
+                obj
+            },
+            interactor = { target -> interact(target) }
+        )
     }
 
     /**
@@ -145,14 +177,15 @@ object Trees {
     }
 
     /**
-     * Chops by human‑friendly tree [name] (e.g., "Oak", "Oak Tree").
-     * Attempts to resolve to a [TreeType] first; otherwise falls back to direct name match.
+     * Builds a [TreeChopRequest] that targets trees identified by [name] (e.g., "Oak").
+     * Attempts to resolve to a [TreeType] first; otherwise falls back to exact-name matching.
      *
      * @param name tree name
-     * @return true if the interaction was issued
+     * @return request builder for chaining (e.g., .nearest())
      */
-    fun chop(name: String): Boolean {
-        val norm = toTitleCase(name.trim())
+    fun chop(name: String): TreeChopRequest {
+        val trimmed = name.trim()
+        val norm = toTitleCase(trimmed)
         val type = TreeType.values().firstOrNull { t ->
             val disp = t.displayName
             val short = disp.removeSuffix(" tree").removeSuffix(" Tree")
@@ -160,16 +193,20 @@ object Trees {
         }
         if (type != null) return chop(type)
 
-        val pattern = Pattern.compile("^" + Pattern.quote(name.trim()) + "$", Pattern.CASE_INSENSITIVE)
-        logger.info("Chop by exact name: '{}'", name)
-        val obj = SceneObjectQuery
-            .newQuery()
-            .name(pattern)
-            .hidden(false)
-            .results()
-            .firstOrNull() ?: return false
-        logger.info("Exact name found: name='{}', typeId={}", obj.name, obj.typeId)
-        return interact(obj)
+        return TreeChopRequest(
+            locator = {
+                val pattern = Pattern.compile("^" + Pattern.quote(trimmed) + "$", Pattern.CASE_INSENSITIVE)
+                logger.info("Chop by exact name: '{}'", trimmed)
+                SceneObjectQuery
+                    .newQuery()
+                    .name(pattern)
+                    .hidden(false)
+                    .results()
+                    .firstOrNull()
+                    ?.also { logger.info("Exact name found: name='{}', typeId={}", it.name, it.typeId) }
+            },
+            interactor = { target -> interact(target) }
+        )
     }
 
     /**
@@ -193,7 +230,7 @@ object Trees {
      * @return true if the interaction was issued
      */
     suspend fun chop(script: SuspendableScript, type: TreeType): Boolean {
-        val ok = chop(type)
+        val ok = chop(type).nearest()
         if (ok) script.awaitTicks(2)
         return ok
     }
@@ -219,7 +256,7 @@ object Trees {
      * @return true if the interaction was issued
      */
     suspend fun chop(script: SuspendableScript, name: String): Boolean {
-        val ok = chop(name)
+        val ok = chop(name).nearest()
         if (ok) script.awaitTicks(2)
         return ok
     }
