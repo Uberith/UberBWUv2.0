@@ -1,14 +1,14 @@
 package com.uberith.uberchop
 
-import com.uberith.api.SuspendableScript
+import com.uberith.api.script.WoodcuttingScript
 import com.uberith.api.game.skills.woodcutting.TreeLocation
-import com.uberith.api.game.skills.woodcutting.WoodcuttingEquipment
-import com.uberith.api.utils.ConfigStore
-import com.uberith.api.game.inventory.Backpack
-import com.uberith.api.game.inventory.Bank
+import com.uberith.uberchop.TreeTypes
 import com.uberith.api.game.skills.woodcutting.Trees
-import com.uberith.api.game.world.Coordinates
-import com.uberith.api.game.world.Traverse
+import com.uberith.api.game.skills.woodcutting.WoodcuttingSession
+import com.uberith.api.script.handlers.AfkJitter
+import com.uberith.api.script.handlers.BreakScheduler
+import com.uberith.api.script.handlers.LogoutGuard
+import com.uberith.api.script.handlers.WorldHopPolicy
 import com.uberith.uberchop.gui.UberChopGUI
 import net.botwithus.rs3.stats.Stats
 import net.botwithus.rs3.world.Coordinate
@@ -16,278 +16,212 @@ import net.botwithus.scripts.Info
 import net.botwithus.ui.workspace.Workspace
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
-import java.util.regex.Pattern
 
 @Info(
     name = "UberChop",
     description = "Uber tree chopper",
-    version = "0.3.0",
+    version = "0.5.0",
     author = "Uberith"
 )
-class UberChop : SuspendableScript() {
-    // Minimal public fields still referenced by the GUI
-    var settings = Settings()
-    var targetTree: String = "Tree"
-    var location: String = ""
-    var bankWhenFull: Boolean = false
-    var withdrawWoodBox: Boolean = false
-    var logsChopped: Int = 0
-    var status: String = "Idle"
-    @Volatile var phase: Phase = Phase.READY
+class UberChop : WoodcuttingScript<UberChopSettings, Phase>(
+    moduleName = "UberChop",
+    settingsClass = UberChopSettings::class.java,
+    defaultFactory = { UberChopSettings() },
+    initialPhase = Phase.READY,
+    phaseLogger = LoggerFactory.getLogger("UberChopPhases")
+) {
+
     private val logger: Logger = LoggerFactory.getLogger(this.javaClass)
-    private var totalRuntimeMs: Long = 0L
-    private var lastRuntimeUpdateMs: Long = 0L
-    var WCLevel = Stats.WOODCUTTING.currentLevel
-    private val settingsStore = ConfigStore<Settings>("UberChop", Settings::class.java)
-    @Volatile private var uiInitialized: Boolean = false
 
-    private val logsPattern: Pattern = Pattern.compile(".*logs.*", Pattern.CASE_INSENSITIVE)
+    private val breakScheduler = BreakScheduler()
+    private val logoutGuard = LogoutGuard()
+    private val afkJitter = AfkJitter()
+    private val worldHopPolicy = WorldHopPolicy()
 
-    private fun applySettings(s: Settings) {
-        settings = s
+    private val gui: UberChopGUI by lazy { UberChopGUI(this) }
+
+    @Volatile private var uiPrimed = false
+    @Volatile private var status: String = "Idle"
+
+    private val LOG_COUNTER = "logs"
+
+    override fun onInitialize() {
+        super.onInitialize()
+        ensureSettingsLoaded()
     }
-
-    // Ensure GUI sees persisted targetTree/location before activation
-    fun ensureUiSettingsLoaded() {
-        if (uiInitialized) return
-        loadSettings(logOnFailure = false)
-        refreshDerivedPreferences()
-        uiInitialized = true
-    }
-
-    private fun loadSettings(logOnFailure: Boolean = true): Boolean {
-        val loaded = settingsStore.load(logOnFailure)
-        if (loaded != null) {
-            applySettings(loaded)
-            return true
-        }
-        return false
-    }
-
-    private fun persistSettings(successMessage: String? = null, errorMessage: String? = null) {
-        settings.savedLocation = location
-        val saved = settingsStore.save(settings, logOnFailure = errorMessage != null)
-        if (saved) {
-            successMessage?.let { logger.info(it) }
-        } else {
-            errorMessage?.let { logger.error(it) }
-        }
-    }
-
-    fun onSettingsChanged() {
-        // Keep settings in sync and persist immediately to JSON
-        persistSettings()
-    }
-    
 
     override fun onActivation() {
-        loadSettings()
-        refreshDerivedPreferences()
-        persistSettings()
-        logger.info("Activated: tree='$targetTree', location='$location' (locations=${treeLocations.size})")
+        super.onActivation()
+        uiPrimed = false
         status = "Active - Preparing"
-        phase = Phase.PREPARING
-        withdrawWoodBox = settings.withdrawWoodBox
-        totalRuntimeMs = 0L
-        lastRuntimeUpdateMs = System.currentTimeMillis()
+        phases.transition(Phase.PREPARING, "Phase: READY -> PREPARING")
+        applyHandlerSettings(settingsSnapshot())
+        logger.info(
+            "Activated: tree='{}', location='{}' (locations={})",
+            resolveTreeName(settingsSnapshot().treeIndex),
+            settingsSnapshot().locationName,
+            Trees.locations.size
+        )
     }
 
     override fun onDeactivation() {
         status = "Inactive"
-        phase = Phase.READY
-        persistSettings("Saved UberChop settings on deactivation", "Failed to save UberChop settings on deactivation")
+        phases.transition(Phase.READY)
+        persistSettings(logOnFailure = true)
         logger.info("Deactivated")
-    }
-
-    override suspend fun onLoop() {
-        updateRuntimeSnapshot()
-
-        when (phase) {
-            Phase.READY -> transitionPhase(Phase.PREPARING, "Phase: READY -> PREPARING")
-            Phase.PREPARING -> if (handlePreparingPhase()) return
-            Phase.BANKING -> if (handleBankingPhase()) return
-            Phase.CHOPPING -> if (handleChoppingPhase()) return
-        }
-
-        awaitTicks(1)
-    }
-
-    private fun updateRuntimeSnapshot() {
-        val now = System.currentTimeMillis()
-        if (lastRuntimeUpdateMs != 0L) {
-            totalRuntimeMs += (now - lastRuntimeUpdateMs)
-        }
-        lastRuntimeUpdateMs = now
-        withdrawWoodBox = settings.withdrawWoodBox
-        WCLevel = Stats.WOODCUTTING.currentLevel
-    }
-
-    private fun transitionPhase(next: Phase, message: String? = null) {
-        if (message != null) {
-            logger.info(message)
-        }
-        phase = next
-    }
-
-    private suspend fun handlePreparingPhase(): Boolean {
-        logger.info("Preparing: target='{}', location='{}'", targetTree, location)
-        logger.info(
-            "Preparing: withdrawWoodBox={}, bankWhenFull={}, worldHop={}, notepaper={}, crystallise={}, rotation={}, pickupNests={}",
-            withdrawWoodBox,
-            bankWhenFull,
-            settings.enableWorldHopping,
-            settings.useMagicNotepaper,
-            settings.useCrystallise,
-            settings.enableTreeRotation,
-            settings.pickupNests
-        )
-        val prepChop = effectiveChopCoordinate()
-        val prepBank = effectiveBankCoordinate()
-        logger.info("Preparing: chopTile={}, bankTile={}", prepChop ?: "none", prepBank ?: "none")
-        if (!withdrawWoodBox) {
-            transitionPhase(Phase.CHOPPING, "Phase: PREPARING -> CHOPPING")
-            return false
-        }
-
-        awaitIdle()
-        if (Traverse.ensureWithin(this, prepBank, 10)) return true
-        if (openBankIfNeeded()) return true
-        if (withdrawWoodBox && WoodcuttingEquipment.ensureWoodBox(this)) return true
-
-        transitionPhase(Phase.CHOPPING, "Phase: PREPARING -> CHOPPING")
-        return false
-    }
-
-    private suspend fun handleBankingPhase(): Boolean {
-        awaitIdle()
-        if (Traverse.ensureWithin(this, effectiveBankCoordinate(), 10)) return true
-        if (openBankIfNeeded()) return true
-        if (withdrawWoodBox && WoodcuttingEquipment.ensureWoodBox(this)) return true
-
-        if (!Backpack.isFull()) {
-            transitionPhase(Phase.CHOPPING, "Phase: BANKING -> CHOPPING")
-            return false
-        }
-
-        if (withdrawWoodBox) {
-            WoodcuttingEquipment.emptyWoodBox(this)
-        }
-
-        logger.info("Depositing logs {}", logsPattern)
-        Bank.depositAll(this, logsPattern)
-        awaitTicks(1)
-        return true
-    }
-
-    private suspend fun handleChoppingPhase(): Boolean {
-        if (Backpack.isFull()) {
-            if (withdrawWoodBox && WoodcuttingEquipment.fillWoodBox(this)) {
-                if (Backpack.isFull()) {
-                    phase = Phase.BANKING
-                    return true
-                }
-            } else {
-                phase = Phase.BANKING
-                return true
-            }
-        }
-
-        status = "Locating nearest $targetTree"
-
-        awaitIdle()
-
-        if (Traverse.ensureWithin(this, effectiveChopCoordinate(), 40)) return true
-
-        if (Trees.chop(this, targetTree)) {
-            status = "Chopping $targetTree"
-            logger.info("Chop target: '$targetTree'")
-            return true
-        }
-
-        status = "No $targetTree nearby"
-        logger.debug("No target '$targetTree' nearby")
-        return false
-    }
-
-
-
-    private suspend fun openBankIfNeeded(): Boolean {
-        if (Bank.isOpen()) return false
-        val opened = Bank.open(this)
-        logger.info("Bank.open() -> {}", opened)
-        awaitTicks(1)
-        return true
-    }
-
-
-
-    private fun refreshDerivedPreferences() {
-        val names = TreeTypes.ALL
-        val treeIndex = settings.savedTreeType.coerceIn(0, names.lastIndex)
-        targetTree = names[treeIndex]
-        val resolved = Trees.resolveLocation(targetTree, settings.savedLocation)
-        location = resolved?.name ?: Trees.locations.firstOrNull()?.name.orEmpty()
-        settings.savedLocation = location
-    }
-
-    fun formattedRuntime(): String {
-        val ms = totalRuntimeMs.coerceAtLeast(0L)
-        val totalSec = ms / 1000
-        val h = totalSec / 3600
-        val m = (totalSec % 3600) / 60
-        val s = totalSec % 60
-        return String.format("%02d:%02d:%02d", h, m, s)
-    }
-
-    fun logsPerHour(): Int {
-        val ms = totalRuntimeMs.coerceAtLeast(1L)
-        val perMs = logsChopped.toDouble() / ms.toDouble()
-        return (perMs * 3_600_000.0).toInt()
-    }
-
-    // Location catalog embedded in code
-    val treeLocations: List<TreeLocation>
-        get() = Trees.locations
-
-    // GUI instance
-    private val gui by lazy { UberChopGUI(this) }
-
-    override fun onInitialize() {
-        super.onInitialize()
-        // Prepare GUI resources
-        try { gui.preload() } catch (_: Throwable) { }
-
-        // Load persisted settings before reading them
-        loadSettings()
+        super.onDeactivation()
     }
 
     override fun onDraw(workspace: Workspace) {
-        // Render the script configuration UI
-        try { gui.render(workspace) } catch (_: Throwable) { }
+        ensureUiSettingsLoaded()
+        gui.render(workspace)
     }
 
-    // Helper accessors for selected location and effective tiles
+    fun ensureUiSettingsLoaded() {
+        if (uiPrimed) return
+        ensureSettingsLoaded()
+        refreshLocationFallback()
+        applyHandlerSettings(settingsSnapshot())
+        uiPrimed = true
+    }
 
-    private fun selectedLocation(): TreeLocation? = treeLocations.firstOrNull { it.name == location }
+    fun statusText(): String = status
+    fun formattedRuntime(): String = runtime.snapshot().formattedTime()
+    fun logsChopped(): Long = runtime.snapshot().count(LOG_COUNTER)
+    fun logsPerHour(): Int = runtime.snapshot().perHour(LOG_COUNTER)
+    fun playerWoodcuttingLevel(): Int = Stats.WOODCUTTING.currentLevel
+
+    fun settingsSnapshot(): UberChopSettings = settingsState.value
+
+    fun mutateSettings(transform: (UberChopSettings) -> UberChopSettings) {
+        val updated = updateSettings(transform)
+        refreshLocationFallback()
+        applyHandlerSettings(updated)
+    }
+
+    fun applySettingsSnapshot(snapshot: UberChopSettings) {
+        replaceSettings(snapshot, persist = true)
+        refreshLocationFallback()
+        applyHandlerSettings(snapshot)
+    }
+
+    override fun createWoodcuttingSession(): WoodcuttingSession {
+        return WoodcuttingSession(
+            script = this,
+            logger = logger,
+            withdrawWoodBox = { settingsSnapshot().withdrawWoodBox },
+            chopTile = { effectiveChopCoordinate() },
+            bankTile = { effectiveBankCoordinate() }
+        )
+    }
+
+    override suspend fun ScriptLoop.onStart(): Boolean {
+        status = "Preparing"
+        return woodcutting.prepare()
+    }
+
+    override suspend fun ScriptLoop.onTick(): Boolean {
+        val now = System.currentTimeMillis()
+        if (breakScheduler.tick(this@UberChop, now)) return true
+        if (afkJitter.tick(this@UberChop, now)) return true
+
+        val snapshot = runtime.snapshot()
+        if (logoutGuard.shouldLogout(snapshot, logsChopped())) {
+            status = "Stopping soon (logout target met)"
+            return false
+        }
+
+        return phaseLoop {
+            when (phase) {
+                Phase.READY -> transitionTo(Phase.PREPARING)
+                Phase.PREPARING -> {
+                    status = "Preparing"
+                    if (woodcutting.prepare()) stay() else transitionTo(Phase.CHOPPING, "Phase: PREPARING -> CHOPPING")
+                }
+                Phase.CHOPPING -> {
+                    val targetTree = resolveTreeName(settingsSnapshot().treeIndex)
+                    status = "Chopping $targetTree"
+                    when (woodcutting.chop(targetTree)) {
+                        WoodcuttingSession.ChopOutcome.WAITED -> stay()
+                        WoodcuttingSession.ChopOutcome.STARTED -> {
+                            runtime.increment(LOG_COUNTER)
+                            stay()
+                        }
+                        WoodcuttingSession.ChopOutcome.NEEDS_BANK -> transitionTo(Phase.BANKING, "Phase: CHOPPING -> BANKING")
+                        WoodcuttingSession.ChopOutcome.NONE -> {
+                            if (worldHopPolicy.shouldHop(playersNearby = 0, resourcesRemaining = 0)) {
+                                status = "Considering world hop"
+                                stay()
+                            } else {
+                                repeat()
+                            }
+                        }
+                    }
+                }
+                Phase.BANKING -> {
+                    status = "Banking"
+                    when (woodcutting.bankInventory()) {
+                        WoodcuttingSession.BankOutcome.WAITED -> stay()
+                        WoodcuttingSession.BankOutcome.INVENTORY_READY -> transitionTo(Phase.CHOPPING, "Phase: BANKING -> CHOPPING")
+                    }
+                }
+            }
+        }
+    }
+
+    fun phase(): Phase = phases.phase
+
+    fun treeNames(): List<String> = TreeTypes.ALL
+
+    fun availableLocations(): List<TreeLocation> {
+        val treeName = resolveTreeName(settingsSnapshot().treeIndex)
+        return Trees.locationsFor(treeName)
+    }
+
+    fun selectedLocation(): TreeLocation? {
+        val name = settingsSnapshot().locationName
+        return Trees.locations.firstOrNull { it.name == name }
+    }
+
+    private fun resolveTreeName(index: Int): String {
+        val names = TreeTypes.ALL
+        return if (names.isEmpty()) "Tree" else names[index.coerceIn(0, names.lastIndex)]
+    }
+
+    private fun refreshLocationFallback() {
+        val snapshot = settingsSnapshot()
+        val treeName = resolveTreeName(snapshot.treeIndex)
+        val resolved = Trees.resolveLocation(treeName, snapshot.locationName)
+        val fallback = resolved?.name ?: Trees.locations.firstOrNull()?.name.orEmpty()
+        if (fallback != snapshot.locationName) {
+            super.updateSettings(transform = { current -> current.copy(locationName = fallback) }, persist = true)
+        }
+    }
 
     private fun effectiveChopCoordinate(): Coordinate? {
-        val locName = location
-        // Custom override takes precedence
-        settings.customLocations[locName]?.let { c ->
-            val x = c.chopX; val y = c.chopY; val z = c.chopZ
-            if (x != null && y != null && z != null) return Coordinate(x, y, z)
+        val snapshot = settingsSnapshot()
+        val locName = snapshot.locationName
+        snapshot.customLocations[locName]?.let { override ->
+            val (cx, cy, cz) = override.chopCoords()
+            if (cx != null && cy != null && cz != null) return Coordinate(cx, cy, cz)
         }
         return selectedLocation()?.chop
     }
 
     private fun effectiveBankCoordinate(): Coordinate? {
-        val locName = location
-        // Custom override takes precedence
-        settings.customLocations[locName]?.let { c ->
-            val x = c.bankX; val y = c.bankY; val z = c.bankZ
-            if (x != null && y != null && z != null) return Coordinate(x, y, z)
+        val snapshot = settingsSnapshot()
+        val locName = snapshot.locationName
+        snapshot.customLocations[locName]?.let { override ->
+            val (bx, by, bz) = override.bankCoords()
+            if (bx != null && by != null && bz != null) return Coordinate(bx, by, bz)
         }
         return selectedLocation()?.bank
     }
-}
 
+    private fun applyHandlerSettings(settings: UberChopSettings) {
+        breakScheduler.update(settings.breakSettings)
+        logoutGuard.update(settings.logoutSettings, runtime.snapshot())
+        afkJitter.update(settings.afkSettings)
+        worldHopPolicy.update(settings.worldHopSettings)
+    }
+}

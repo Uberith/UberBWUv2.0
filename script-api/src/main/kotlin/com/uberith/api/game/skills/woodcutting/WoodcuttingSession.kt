@@ -1,0 +1,92 @@
+package com.uberith.api.game.skills.woodcutting
+
+import com.uberith.api.SuspendableScript
+import com.uberith.api.game.inventory.Backpack
+import com.uberith.api.game.inventory.Bank
+import com.uberith.api.game.world.Traverse
+import net.botwithus.rs3.world.Coordinate
+import org.slf4j.Logger
+import java.util.regex.Pattern
+
+/**
+ * High-level woodcutting orchestration that stitches together movement, banking, and chopping.
+ */
+class WoodcuttingSession(
+    private val script: SuspendableScript,
+    private val logger: Logger,
+    private val withdrawWoodBox: () -> Boolean,
+    private val chopTile: () -> Coordinate?,
+    private val bankTile: () -> Coordinate?
+) {
+
+    private val logsPattern: Pattern = Pattern.compile(".*logs.*", Pattern.CASE_INSENSITIVE)
+
+    enum class ChopOutcome { NONE, WAITED, STARTED, NEEDS_BANK }
+    enum class BankOutcome { WAITED, INVENTORY_READY }
+
+    suspend fun prepare(): Boolean {
+        if (!withdrawWoodBox()) return false
+        script.awaitIdle()
+        if (Traverse.ensureWithin(script, bankTile(), 10)) return true
+        if (openBankIfNeeded()) return true
+        if (WoodcuttingEquipment.ensureWoodBox(script)) return true
+        return false
+    }
+
+    suspend fun bankInventory(): BankOutcome {
+        script.awaitIdle()
+        if (Traverse.ensureWithin(script, bankTile(), 10)) return BankOutcome.WAITED
+        if (openBankIfNeeded()) return BankOutcome.WAITED
+        if (withdrawWoodBox() && WoodcuttingEquipment.ensureWoodBox(script)) return BankOutcome.WAITED
+
+        if (!Backpack.isFull()) {
+            return BankOutcome.INVENTORY_READY
+        }
+
+        if (withdrawWoodBox()) {
+            val emptied = WoodcuttingEquipment.emptyWoodBox(script)
+            if (emptied) {
+                return BankOutcome.WAITED
+            }
+        }
+
+        logger.info("Depositing logs {}", logsPattern)
+        Bank.depositAll(script, logsPattern)
+        script.awaitTicks(1)
+        return BankOutcome.WAITED
+    }
+
+    suspend fun chop(targetTree: String): ChopOutcome {
+        if (Backpack.isFull()) {
+            if (withdrawWoodBox()) {
+                val filled = WoodcuttingEquipment.fillWoodBox(script)
+                if (filled) {
+                    return if (Backpack.isFull()) ChopOutcome.NEEDS_BANK else ChopOutcome.WAITED
+                }
+            }
+            return ChopOutcome.NEEDS_BANK
+        }
+
+        script.awaitIdle()
+
+        if (Traverse.ensureWithin(script, chopTile(), 40)) {
+            return ChopOutcome.WAITED
+        }
+
+        if (Trees.chop(script, targetTree)) {
+            logger.info("Chop target: '{}'", targetTree)
+            return ChopOutcome.STARTED
+        }
+
+        logger.debug("No target '{}' nearby", targetTree)
+        return ChopOutcome.NONE
+    }
+
+    private suspend fun openBankIfNeeded(): Boolean {
+        if (Bank.isOpen()) return false
+        val opened = Bank.open(script)
+        logger.info("Bank.open() -> {}", opened)
+        script.awaitTicks(1)
+        return opened
+    }
+}

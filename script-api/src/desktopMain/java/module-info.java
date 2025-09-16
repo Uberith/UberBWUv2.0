@@ -8,6 +8,8 @@ module UberScriptAPI.main {
 
     exports com.uberith.api;
     exports com.uberith.api.utils;
+    exports com.uberith.api.script;
+    exports com.uberith.api.script.handlers;
     exports com.uberith.api.game;
     exports com.uberith.api.game.world;
     exports com.uberith.api.game.inventory;
@@ -15,4 +17,5 @@ module UberScriptAPI.main {
     exports com.uberith.api.game.skills.magic;
     exports com.uberith.api.game.skills.woodcutting;
     exports com.uberith.api.ui;
+    exports com.uberith.api.ui.imgui;
 }
