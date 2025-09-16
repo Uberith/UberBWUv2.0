@@ -1,7 +1,9 @@
 package com.uberith.uberchop
 
 import com.uberith.api.SuspendableScript
-import com.example.config.ConfigService
+import com.uberith.api.utils.ConfigFiles
+import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import com.uberith.api.game.inventory.Backpack
 import com.uberith.api.game.inventory.Bank
 import com.uberith.api.game.skills.woodcutting.Trees
@@ -15,7 +17,7 @@ import net.botwithus.scripts.Info
 import net.botwithus.ui.workspace.Workspace
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
-import kotlin.random.Random
+import java.util.regex.Pattern
 
 @Info(
     name = "UberChop",
@@ -37,55 +39,77 @@ class UberChop : SuspendableScript() {
     private var totalRuntimeMs: Long = 0L
     private var lastRuntimeUpdateMs: Long = 0L
     var WCLevel = Stats.WOODCUTTING.currentLevel
-    // Simplified persistence wiring
-    private val configService = ConfigService()
-    private val settingsStore = SettingsStore(configService)
-    private var activeProfile: String = "default"
+    private val gson: Gson = GsonBuilder().setPrettyPrinting().create()
+    @Volatile private var uiInitialized: Boolean = false
+
+    private val woodBoxPattern: Pattern = Pattern.compile(".*wood box.*", Pattern.CASE_INSENSITIVE)
+    private val logsPattern: Pattern = Pattern.compile(".*logs.*", Pattern.CASE_INSENSITIVE)
 
     private fun applySettings(s: Settings) {
         settings = s
     }
 
-    private fun ensurePersistenceInitialized() {
-        // Ensure active profile is sane and directories exist
-        activeProfile = configService.ensureProfileName(activeProfile)
-        try { configService.getWorkspaceDir() } catch (_: Throwable) { }
+    private fun configFile() = java.io.File(ConfigFiles.configsDir(), "UberChop.json")
+
+    private fun ensurePersistenceInitialized() { /* no-op with JSON-only persistence */ }
+
+    // Ensure GUI sees persisted targetTree/location before activation
+    fun ensureUiSettingsLoaded() {
+        if (uiInitialized) return
+        loadSettings(logOnFailure = false)
+        refreshDerivedPreferences()
+        uiInitialized = true
     }
 
-    private fun loadSettings() {
+    private fun loadSettings(logOnFailure: Boolean = true): Boolean {
+        val cfg = configFile()
+        return try {
+            val json = ConfigFiles.readModuleSettings("UberChop")
+            if (json.isNullOrBlank()) {
+                false
+            } else {
+                val loaded = gson.fromJson(json, Settings::class.java)
+                if (loaded != null) {
+                    applySettings(loaded)
+                    logger.info("Loaded settings from {}", cfg.absolutePath)
+                    true
+                } else {
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            if (logOnFailure) {
+                logger.warn("Failed to load settings from {}: {}", cfg.absolutePath, e.message)
+            }
+            false
+        }
+    }
+
+    private fun persistSettings(successMessage: String? = null, errorMessage: String = "Failed to write JSON settings") {
+        settings.savedLocation = location
         try {
-            applySettings(settingsStore.load(activeProfile, settings))
-        } catch (_: Throwable) { }
+            val file = ConfigFiles.writeModuleSettings("UberChop", gson.toJson(settings))
+            if (successMessage != null) {
+                logger.info(successMessage, file.absolutePath)
+            }
+        } catch (t: Throwable) {
+            logger.error(errorMessage, t)
+        }
     }
 
     fun onSettingsChanged() {
-        // Persist immediately in a simple, reliable way
-        try { settingsStore.save(activeProfile, settings) } catch (_: Throwable) { }
+        // Keep settings in sync and persist immediately to JSON
+        persistSettings()
     }
     
 
     override fun onActivation() {
-
-        // Load persisted settings and apply to in-memory instance
-        try { applySettings(settingsStore.load(activeProfile, settings)) } catch (_: Throwable) { }
-        val idx = settings.savedTreeType.coerceIn(0, TreeTypes.ALL.size - 1)
-        targetTree = TreeTypes.ALL[idx]
-        // Initialize location from saved preference if valid for current tree
-        val curTreeLower = targetTree.lowercase()
-        val validForTree = treeLocations.filter { loc ->
-            loc.availableTrees.any { at ->
-                val a = at.lowercase(); a.contains(curTreeLower) || curTreeLower.contains(a)
-            }
-        }
-        val saved = settings.savedLocation
-        location = if (saved.isNotBlank() && validForTree.any { it.name == saved }) saved
-            else validForTree.firstOrNull()?.name ?: treeLocations.firstOrNull()?.name.orEmpty()
-        settings.savedLocation = location
+        loadSettings()
+        refreshDerivedPreferences()
+        persistSettings()
         logger.info("Activated: tree='$targetTree', location='$location' (locations=${treeLocations.size})")
-        // No immediate save; debounced writes occur on setting changes.
         status = "Active - Preparing"
         phase = Phase.PREPARING
-        // sync cached flags from settings
         withdrawWoodBox = settings.withdrawWoodBox
         totalRuntimeMs = 0L
         lastRuntimeUpdateMs = System.currentTimeMillis()
@@ -94,193 +118,190 @@ class UberChop : SuspendableScript() {
     override fun onDeactivation() {
         status = "Inactive"
         phase = Phase.READY
+        persistSettings("Saved settings on deactivation to {}", "Failed to save settings on deactivation")
         logger.info("Deactivated")
     }
 
     override suspend fun onLoop() {
-        // No read-from-disk here; the GUI and activation steps manage state.
-        val now = System.currentTimeMillis()
-        if (lastRuntimeUpdateMs != 0L) totalRuntimeMs += (now - lastRuntimeUpdateMs)
-        lastRuntimeUpdateMs = now
-        // sync cached flags from settings to reflect GUI changes
-        withdrawWoodBox = settings.withdrawWoodBox
-        WCLevel = Stats.WOODCUTTING.currentLevel
+        updateRuntimeSnapshot()
 
         when (phase) {
-            Phase.READY -> {
-                logger.info("Phase: READY -> PREPARING")
-                phase = Phase.PREPARING
-            }
-            Phase.PREPARING -> {
-                // Configuration summary before moving to active loop
-                logger.info("Preparing: target='{}', location='{}'", targetTree, location)
-                logger.info(
-                    "Preparing: withdrawWoodBox={}, bankWhenFull={}, worldHop={}, notepaper={}, crystallise={}, rotation={}, pickupNests={}",
-                    withdrawWoodBox,
-                    bankWhenFull,
-                    settings.enableWorldHopping,
-                    settings.useMagicNotepaper,
-                    settings.useCrystallise,
-                    settings.enableTreeRotation,
-                    settings.pickupNests
-                )
-                val prepChop = effectiveChopCoordinate()
-                val prepBank = effectiveBankCoordinate()
-                logger.info("Preparing: chopTile={}, bankTile={}", prepChop ?: "none", prepBank ?: "none")
-                logger.info("Phase: PREPARING -> CHOPPING")
-                if (!withdrawWoodBox) {
-                    phase = Phase.CHOPPING
-                    return
-                }
-
-                // Wait to be idle only if currently animating, and handle null player safely
-                val currentAnim = LocalPlayer.self()?.animationId ?: -1
-                if (currentAnim != -1) {
-                    awaitUntil { (LocalPlayer.self()?.animationId ?: -1) == -1 }
-                }
-
-                // Wait to not be moving
-                if (LocalPlayer.self().isMoving) {
-                    awaitUntil { !LocalPlayer.self().isMoving }
-                }
-
-                // Walk near configured bank tile if present
-                val bankTile = effectiveBankCoordinate()
-                if (bankTile != null && !Coordinates.isPlayerWithinRadius(bankTile, 10)) {
-                    logger.info("Walking to bank tile $bankTile")
-                    val walkCoordinates = Coordinates.randomReachableNear(bankTile, 10, 32)
-                    Traverse.walkTo(walkCoordinates, true)
-                    awaitTicks(1)
-                    return
-                }
-
-                // Open the bank if not open already
-                if (!Bank.isOpen()) {
-                    val opened = Bank.open(this)
-                    logger.info("Bank.open() -> $opened")
-                    awaitTicks(1)
-                    return
-                }
-
-                val woodBoxPat = java.util.regex.Pattern.compile(".*wood box.*", java.util.regex.Pattern.CASE_INSENSITIVE)
-                if (!Backpack.contains(woodBoxPat) && withdrawWoodBox) {
-                    Bank.withdraw(woodBoxPat, 1)
-                    awaitTicks(1)
-                    return
-                }
-
-                phase = Phase.CHOPPING
-            }
-            Phase.BANKING -> {
-                // Wait to be idle only if currently animating, and handle null player safely
-                val currentAnim = LocalPlayer.self()?.animationId ?: -1
-                if (currentAnim != -1) {
-                    awaitUntil { (LocalPlayer.self()?.animationId ?: -1) == -1 }
-                }
-
-                // Wait to not be moving
-                if (LocalPlayer.self().isMoving) {
-                    awaitUntil { !LocalPlayer.self().isMoving }
-                }
-
-                // Walk near configured bank tile if present
-                val bankTile = effectiveBankCoordinate()
-                if (bankTile != null && !Coordinates.isPlayerWithinRadius(bankTile, 10)) {
-                    logger.info("Walking to bank tile $bankTile")
-                    val walkCoordinates = Coordinates.randomReachableNear(bankTile, 10, 32)
-                    Traverse.walkTo(walkCoordinates, true)
-                    awaitTicks(1)
-                    return
-                }
-
-                // Open the bank if not open already
-                if (!Bank.isOpen()) {
-                    val opened = Bank.open(this)
-                    logger.info("Bank.open() -> $opened")
-                    awaitTicks(1)
-                    return
-                }
-
-                // If Withdrawal wood box is enabled, retrieve from bank
-                val woodBoxPat = java.util.regex.Pattern.compile(".*wood box.*", java.util.regex.Pattern.CASE_INSENSITIVE)
-                if (!Backpack.contains(woodBoxPat) && withdrawWoodBox) {
-                    Bank.withdraw(woodBoxPat, 1)
-                    awaitTicks(1)
-                    return
-                }
-
-                // If backpack is full, deposit, otherwise switch to chopping
-                if (!Backpack.isFull()) {
-                    phase = Phase.CHOPPING
-                } else {
-                    val woodBox = Backpack.getItem({ n, h -> h.toString().contains(n, true) }, "wood box")
-                    if (woodBox != null && Bank.isOpen()) {
-                        logger.info("Emptying wood box via bank option or backpack fallback")
-                        Bank.emptyBox(this, woodBox.name, "Empty - logs and bird's nests")
-                        awaitTicks(1)
-                    }
-                    val logsPat = java.util.regex.Pattern.compile(".*logs.*", java.util.regex.Pattern.CASE_INSENSITIVE)
-                    logger.info("Depositing logs $logsPat")
-                    Bank.depositAll(this, logsPat)
-                    awaitTicks(1)
-                }
-
-            }
-            Phase.CHOPPING -> {
-                if (Backpack.isFull()) {
-                    val woodBox = Backpack.getItem({ n, h -> h.toString().contains(n, true) }, "wood box")
-                    if (woodBox != null) {
-                        woodBox.let { Backpack.interact(it, "Fill") }
-                        awaitTicks(1)
-                        if (Backpack.isFull()) {
-                            phase = Phase.BANKING
-                            return
-                        }
-                    } else {
-                        phase = Phase.BANKING
-                        return
-                    }
-                }
-
-                // Update status before any waits so UI doesn't look stuck
-                status = "Locating nearest $targetTree"
-
-                // Wait to be idle only if currently animating, and handle null player safely
-                val currentAnim = LocalPlayer.self()?.animationId ?: -1
-                if (currentAnim != -1) {
-                    awaitUntil { (LocalPlayer.self()?.animationId ?: -1) == -1 }
-                }
-
-                if (LocalPlayer.self().isMoving) {
-                    awaitUntil { !LocalPlayer.self().isMoving }
-                }
-
-                // Move towards configured chop tile if present and not nearby
-                effectiveChopCoordinate()?.let { chopTile ->
-                    if (!Coordinates.isPlayerWithinRadius(chopTile, 40)) {
-                        logger.info("Walking to chop tile $chopTile")
-                        val walkCoordinates = Coordinates.randomReachableNear(chopTile, 10, 32)
-                        Traverse.walkTo(walkCoordinates, true)
-                        awaitTicks(1)
-                        return
-                    }
-                }
-
-                val tree = Trees.nearest(targetTree)
-
-                if (tree != null) {
-                    status = "Chopping ${tree.name}"
-                    logger.info("Chop target: '${tree.name}'")
-                    Trees.chop(tree)
-                    awaitTicks(1)
-                } else {
-                    status = "No $targetTree nearby"
-                    logger.debug("No target '$targetTree' nearby")
-                }
-            }
+            Phase.READY -> transitionPhase(Phase.PREPARING, "Phase: READY -> PREPARING")
+            Phase.PREPARING -> if (handlePreparingPhase()) return
+            Phase.BANKING -> if (handleBankingPhase()) return
+            Phase.CHOPPING -> if (handleChoppingPhase()) return
         }
 
         awaitTicks(1)
+    }
+
+    private fun updateRuntimeSnapshot() {
+        val now = System.currentTimeMillis()
+        if (lastRuntimeUpdateMs != 0L) {
+            totalRuntimeMs += (now - lastRuntimeUpdateMs)
+        }
+        lastRuntimeUpdateMs = now
+        withdrawWoodBox = settings.withdrawWoodBox
+        WCLevel = Stats.WOODCUTTING.currentLevel
+    }
+
+    private fun transitionPhase(next: Phase, message: String? = null) {
+        if (message != null) {
+            logger.info(message)
+        }
+        phase = next
+    }
+
+    private suspend fun handlePreparingPhase(): Boolean {
+        logger.info("Preparing: target='{}', location='{}'", targetTree, location)
+        logger.info(
+            "Preparing: withdrawWoodBox={}, bankWhenFull={}, worldHop={}, notepaper={}, crystallise={}, rotation={}, pickupNests={}",
+            withdrawWoodBox,
+            bankWhenFull,
+            settings.enableWorldHopping,
+            settings.useMagicNotepaper,
+            settings.useCrystallise,
+            settings.enableTreeRotation,
+            settings.pickupNests
+        )
+        val prepChop = effectiveChopCoordinate()
+        val prepBank = effectiveBankCoordinate()
+        logger.info("Preparing: chopTile={}, bankTile={}", prepChop ?: "none", prepBank ?: "none")
+        if (!withdrawWoodBox) {
+            transitionPhase(Phase.CHOPPING, "Phase: PREPARING -> CHOPPING")
+            return false
+        }
+
+        waitForIdle()
+        if (moveTowards(prepBank, 10, "bank tile")) return true
+        if (openBankIfNeeded()) return true
+        if (ensureWoodBoxPresent()) return true
+
+        transitionPhase(Phase.CHOPPING, "Phase: PREPARING -> CHOPPING")
+        return false
+    }
+
+    private suspend fun handleBankingPhase(): Boolean {
+        waitForIdle()
+        if (moveTowards(effectiveBankCoordinate(), 10, "bank tile")) return true
+        if (openBankIfNeeded()) return true
+        if (ensureWoodBoxPresent()) return true
+
+        if (!Backpack.isFull()) {
+            transitionPhase(Phase.CHOPPING, "Phase: BANKING -> CHOPPING")
+            return false
+        }
+
+        findWoodBox()?.let { woodBox ->
+            if (Bank.isOpen()) {
+                logger.info("Emptying wood box via bank option or backpack fallback")
+                Bank.emptyBox(this, woodBox.name, "Empty - logs and bird's nests")
+                awaitTicks(1)
+            }
+        }
+
+        logger.info("Depositing logs {}", logsPattern)
+        Bank.depositAll(this, logsPattern)
+        awaitTicks(1)
+        return true
+    }
+
+    private suspend fun handleChoppingPhase(): Boolean {
+        if (Backpack.isFull()) {
+            val woodBox = findWoodBox()
+            if (woodBox != null) {
+                Backpack.interact(woodBox, "Fill")
+                awaitTicks(1)
+                if (Backpack.isFull()) {
+                    phase = Phase.BANKING
+                    return true
+                }
+            } else {
+                phase = Phase.BANKING
+                return true
+            }
+        }
+
+        status = "Locating nearest $targetTree"
+
+        waitForIdle()
+
+        if (moveTowards(effectiveChopCoordinate(), 40, "chop tile")) return true
+
+        val tree = Trees.nearest(targetTree)
+        if (tree != null) {
+            status = "Chopping ${tree.name}"
+            logger.info("Chop target: '${tree.name}'")
+            Trees.chop(tree)
+            awaitTicks(1)
+            return true
+        }
+
+        status = "No $targetTree nearby"
+        logger.debug("No target '$targetTree' nearby")
+        return false
+    }
+
+    private suspend fun waitForIdle() {
+        val animationId = LocalPlayer.self()?.animationId ?: -1
+        if (animationId != -1) {
+            awaitUntil { (LocalPlayer.self()?.animationId ?: -1) == -1 }
+        }
+        if (LocalPlayer.self()?.isMoving == true) {
+            awaitUntil { LocalPlayer.self()?.isMoving != true }
+        }
+    }
+
+    private suspend fun moveTowards(target: Coordinate?, within: Int, description: String): Boolean {
+        val tile = target ?: return false
+        if (Coordinates.isPlayerWithinRadius(tile, within)) return false
+        logger.info("Walking to $description $tile")
+        val walkCoordinates = Coordinates.randomReachableNear(tile, 10, 32)
+        Traverse.walkTo(walkCoordinates, true)
+        awaitTicks(1)
+        return true
+    }
+
+    private suspend fun openBankIfNeeded(): Boolean {
+        if (Bank.isOpen()) return false
+        val opened = Bank.open(this)
+        logger.info("Bank.open() -> {}", opened)
+        awaitTicks(1)
+        return true
+    }
+
+    private suspend fun ensureWoodBoxPresent(): Boolean {
+        if (!withdrawWoodBox || Backpack.contains(woodBoxPattern)) return false
+        Bank.withdraw(woodBoxPattern, 1)
+        awaitTicks(1)
+        return true
+    }
+
+    private fun findWoodBox() = Backpack.getItem({ name, item -> item.toString().contains(name, true) }, "wood box")
+
+    private fun refreshDerivedPreferences() {
+        val treeIndex = settings.savedTreeType.coerceIn(0, TreeTypes.ALL.lastIndex)
+        targetTree = TreeTypes.ALL[treeIndex]
+        location = resolvedLocationForTree(targetTree, settings.savedLocation)
+        settings.savedLocation = location
+    }
+
+    private fun resolvedLocationForTree(tree: String, saved: String): String {
+        val valid = validLocationsForTree(tree)
+        if (saved.isNotBlank() && valid.any { it.name == saved }) {
+            return saved
+        }
+        return valid.firstOrNull()?.name ?: treeLocations.firstOrNull()?.name.orEmpty()
+    }
+
+    private fun validLocationsForTree(tree: String): List<TreeLocation> {
+        val desired = tree.lowercase()
+        return treeLocations.filter { loc ->
+            loc.availableTrees.any { candidate ->
+                val lower = candidate.lowercase()
+                lower.contains(desired) || desired.contains(lower)
+            }
+        }
     }
 
     fun formattedRuntime(): String {

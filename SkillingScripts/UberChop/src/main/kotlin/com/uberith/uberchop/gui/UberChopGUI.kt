@@ -64,6 +64,8 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
     }
 
     private fun renderInternal() {
+        // Ensure persisted tree/location are reflected before any UI usage
+        script.ensureUiSettingsLoaded()
         // Fixed-size, small-screen friendly window (supports compact mode)
         if (minimized) {
             ImGui.setNextWindowSize(360f, 140f)
@@ -762,6 +764,23 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             ImGui.endCombo()
         }
 
+        // Log handling mode
+        val logOptions = listOf("Bank Logs", "Burn Logs", "Fletch Logs")
+        val curLogIdx = script.settings.logHandlingMode.coerceIn(0, logOptions.lastIndex)
+        ImGui.text("On logs:")
+        ImGui.sameLine(0f, 6f)
+        val shownLog = logOptions.getOrElse(curLogIdx) { logOptions.first() }
+        if (ImGui.beginCombo("##logsActionCombo", shownLog, 0)) {
+            for (i in logOptions.indices) {
+                val isSelected = (i == curLogIdx)
+                if (ImGui.selectable(logOptions[i], isSelected, 0, 0f, 0f)) {
+                    script.settings.logHandlingMode = i
+                    script.onSettingsChanged()
+                }
+            }
+            ImGui.endCombo()
+        }
+
         // Keep UI buffers in sync when the selected location changes
         val curLoc = script.location
         if (coordUiLocName != curLoc) {
@@ -1365,10 +1384,10 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         ImGui.separator()
         ImGui.text("Target: ${script.targetTree}")
         ImGui.text("Phase: ${script.phase}")
-        ImGui.text("Log handling: " + when (script.settings.logHandlingMode) {
-            1 -> "Magic Notepaper"
-            2 -> "No Bank"
-            else -> "Bank logs + nests"
+        ImGui.text("Log handling: " + when (script.settings.logHandlingMode.coerceIn(0, 2)) {
+            1 -> "Burn Logs"
+            2 -> "Fletch Logs"
+            else -> "Bank Logs"
         })
     }
 

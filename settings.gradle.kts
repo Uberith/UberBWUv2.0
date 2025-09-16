@@ -27,7 +27,9 @@ dependencyResolutionManagement {
 
 rootProject.name = "UberBWU2.0"
 
+// Modules
 include(":script-api")
-include(":app")
-
-include("UberScripts")
+// Aggregate module for scripts
+include(":SkillingScripts")
+// Individual scripts
+include(":SkillingScripts:UberChop")
