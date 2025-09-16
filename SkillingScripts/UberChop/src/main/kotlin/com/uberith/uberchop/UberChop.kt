@@ -1,16 +1,15 @@
 package com.uberith.uberchop
 
 import com.uberith.api.SuspendableScript
-import com.uberith.api.utils.ConfigFiles
-import com.google.gson.Gson
-import com.google.gson.GsonBuilder
+import com.uberith.api.game.skills.woodcutting.TreeLocation
+import com.uberith.api.game.skills.woodcutting.WoodcuttingEquipment
+import com.uberith.api.utils.ConfigStore
 import com.uberith.api.game.inventory.Backpack
 import com.uberith.api.game.inventory.Bank
 import com.uberith.api.game.skills.woodcutting.Trees
 import com.uberith.api.game.world.Coordinates
 import com.uberith.api.game.world.Traverse
 import com.uberith.uberchop.gui.UberChopGUI
-import net.botwithus.rs3.entities.LocalPlayer
 import net.botwithus.rs3.stats.Stats
 import net.botwithus.rs3.world.Coordinate
 import net.botwithus.scripts.Info
@@ -39,19 +38,14 @@ class UberChop : SuspendableScript() {
     private var totalRuntimeMs: Long = 0L
     private var lastRuntimeUpdateMs: Long = 0L
     var WCLevel = Stats.WOODCUTTING.currentLevel
-    private val gson: Gson = GsonBuilder().setPrettyPrinting().create()
+    private val settingsStore = ConfigStore<Settings>("UberChop", Settings::class.java)
     @Volatile private var uiInitialized: Boolean = false
 
-    private val woodBoxPattern: Pattern = Pattern.compile(".*wood box.*", Pattern.CASE_INSENSITIVE)
     private val logsPattern: Pattern = Pattern.compile(".*logs.*", Pattern.CASE_INSENSITIVE)
 
     private fun applySettings(s: Settings) {
         settings = s
     }
-
-    private fun configFile() = java.io.File(ConfigFiles.configsDir(), "UberChop.json")
-
-    private fun ensurePersistenceInitialized() { /* no-op with JSON-only persistence */ }
 
     // Ensure GUI sees persisted targetTree/location before activation
     fun ensureUiSettingsLoaded() {
@@ -62,38 +56,21 @@ class UberChop : SuspendableScript() {
     }
 
     private fun loadSettings(logOnFailure: Boolean = true): Boolean {
-        val cfg = configFile()
-        return try {
-            val json = ConfigFiles.readModuleSettings("UberChop")
-            if (json.isNullOrBlank()) {
-                false
-            } else {
-                val loaded = gson.fromJson(json, Settings::class.java)
-                if (loaded != null) {
-                    applySettings(loaded)
-                    logger.info("Loaded settings from {}", cfg.absolutePath)
-                    true
-                } else {
-                    false
-                }
-            }
-        } catch (e: Exception) {
-            if (logOnFailure) {
-                logger.warn("Failed to load settings from {}: {}", cfg.absolutePath, e.message)
-            }
-            false
+        val loaded = settingsStore.load(logOnFailure)
+        if (loaded != null) {
+            applySettings(loaded)
+            return true
         }
+        return false
     }
 
-    private fun persistSettings(successMessage: String? = null, errorMessage: String = "Failed to write JSON settings") {
+    private fun persistSettings(successMessage: String? = null, errorMessage: String? = null) {
         settings.savedLocation = location
-        try {
-            val file = ConfigFiles.writeModuleSettings("UberChop", gson.toJson(settings))
-            if (successMessage != null) {
-                logger.info(successMessage, file.absolutePath)
-            }
-        } catch (t: Throwable) {
-            logger.error(errorMessage, t)
+        val saved = settingsStore.save(settings, logOnFailure = errorMessage != null)
+        if (saved) {
+            successMessage?.let { logger.info(it) }
+        } else {
+            errorMessage?.let { logger.error(it) }
         }
     }
 
@@ -118,7 +95,7 @@ class UberChop : SuspendableScript() {
     override fun onDeactivation() {
         status = "Inactive"
         phase = Phase.READY
-        persistSettings("Saved settings on deactivation to {}", "Failed to save settings on deactivation")
+        persistSettings("Saved UberChop settings on deactivation", "Failed to save UberChop settings on deactivation")
         logger.info("Deactivated")
     }
 
@@ -172,32 +149,28 @@ class UberChop : SuspendableScript() {
             return false
         }
 
-        waitForIdle()
-        if (moveTowards(prepBank, 10, "bank tile")) return true
+        awaitIdle()
+        if (Traverse.ensureWithin(this, prepBank, 10)) return true
         if (openBankIfNeeded()) return true
-        if (ensureWoodBoxPresent()) return true
+        if (withdrawWoodBox && WoodcuttingEquipment.ensureWoodBox(this)) return true
 
         transitionPhase(Phase.CHOPPING, "Phase: PREPARING -> CHOPPING")
         return false
     }
 
     private suspend fun handleBankingPhase(): Boolean {
-        waitForIdle()
-        if (moveTowards(effectiveBankCoordinate(), 10, "bank tile")) return true
+        awaitIdle()
+        if (Traverse.ensureWithin(this, effectiveBankCoordinate(), 10)) return true
         if (openBankIfNeeded()) return true
-        if (ensureWoodBoxPresent()) return true
+        if (withdrawWoodBox && WoodcuttingEquipment.ensureWoodBox(this)) return true
 
         if (!Backpack.isFull()) {
             transitionPhase(Phase.CHOPPING, "Phase: BANKING -> CHOPPING")
             return false
         }
 
-        findWoodBox()?.let { woodBox ->
-            if (Bank.isOpen()) {
-                logger.info("Emptying wood box via bank option or backpack fallback")
-                Bank.emptyBox(this, woodBox.name, "Empty - logs and bird's nests")
-                awaitTicks(1)
-            }
+        if (withdrawWoodBox) {
+            WoodcuttingEquipment.emptyWoodBox(this)
         }
 
         logger.info("Depositing logs {}", logsPattern)
@@ -208,10 +181,7 @@ class UberChop : SuspendableScript() {
 
     private suspend fun handleChoppingPhase(): Boolean {
         if (Backpack.isFull()) {
-            val woodBox = findWoodBox()
-            if (woodBox != null) {
-                Backpack.interact(woodBox, "Fill")
-                awaitTicks(1)
+            if (withdrawWoodBox && WoodcuttingEquipment.fillWoodBox(this)) {
                 if (Backpack.isFull()) {
                     phase = Phase.BANKING
                     return true
@@ -224,14 +194,13 @@ class UberChop : SuspendableScript() {
 
         status = "Locating nearest $targetTree"
 
-        waitForIdle()
+        awaitIdle()
 
-        if (moveTowards(effectiveChopCoordinate(), 40, "chop tile")) return true
+        if (Traverse.ensureWithin(this, effectiveChopCoordinate(), 40)) return true
 
-        if (Trees.chop(targetTree).nearest()) {
+        if (Trees.chop(this, targetTree)) {
             status = "Chopping $targetTree"
             logger.info("Chop target: '$targetTree'")
-            awaitTicks(1)
             return true
         }
 
@@ -240,25 +209,7 @@ class UberChop : SuspendableScript() {
         return false
     }
 
-    private suspend fun waitForIdle() {
-        val animationId = LocalPlayer.self()?.animationId ?: -1
-        if (animationId != -1) {
-            awaitUntil { (LocalPlayer.self()?.animationId ?: -1) == -1 }
-        }
-        if (LocalPlayer.self()?.isMoving == true) {
-            awaitUntil { LocalPlayer.self()?.isMoving != true }
-        }
-    }
 
-    private suspend fun moveTowards(target: Coordinate?, within: Int, description: String): Boolean {
-        val tile = target ?: return false
-        if (Coordinates.isPlayerWithinRadius(tile, within)) return false
-        logger.info("Walking to $description $tile")
-        val walkCoordinates = Coordinates.randomReachableNear(tile, 10, 32)
-        Traverse.walkTo(walkCoordinates, true)
-        awaitTicks(1)
-        return true
-    }
 
     private suspend fun openBankIfNeeded(): Boolean {
         if (Bank.isOpen()) return false
@@ -268,38 +219,15 @@ class UberChop : SuspendableScript() {
         return true
     }
 
-    private suspend fun ensureWoodBoxPresent(): Boolean {
-        if (!withdrawWoodBox || Backpack.contains(woodBoxPattern)) return false
-        Bank.withdraw(woodBoxPattern, 1)
-        awaitTicks(1)
-        return true
-    }
 
-    private fun findWoodBox() = Backpack.getItem({ name, item -> item.toString().contains(name, true) }, "wood box")
 
     private fun refreshDerivedPreferences() {
-        val treeIndex = settings.savedTreeType.coerceIn(0, TreeTypes.ALL.lastIndex)
-        targetTree = TreeTypes.ALL[treeIndex]
-        location = resolvedLocationForTree(targetTree, settings.savedLocation)
+        val names = TreeTypes.ALL
+        val treeIndex = settings.savedTreeType.coerceIn(0, names.lastIndex)
+        targetTree = names[treeIndex]
+        val resolved = Trees.resolveLocation(targetTree, settings.savedLocation)
+        location = resolved?.name ?: Trees.locations.firstOrNull()?.name.orEmpty()
         settings.savedLocation = location
-    }
-
-    private fun resolvedLocationForTree(tree: String, saved: String): String {
-        val valid = validLocationsForTree(tree)
-        if (saved.isNotBlank() && valid.any { it.name == saved }) {
-            return saved
-        }
-        return valid.firstOrNull()?.name ?: treeLocations.firstOrNull()?.name.orEmpty()
-    }
-
-    private fun validLocationsForTree(tree: String): List<TreeLocation> {
-        val desired = tree.lowercase()
-        return treeLocations.filter { loc ->
-            loc.availableTrees.any { candidate ->
-                val lower = candidate.lowercase()
-                lower.contains(desired) || desired.contains(lower)
-            }
-        }
     }
 
     fun formattedRuntime(): String {
@@ -318,7 +246,8 @@ class UberChop : SuspendableScript() {
     }
 
     // Location catalog embedded in code
-    var treeLocations: List<TreeLocation> = LocationCatalog.ALL
+    val treeLocations: List<TreeLocation>
+        get() = Trees.locations
 
     // GUI instance
     private val gui by lazy { UberChopGUI(this) }
@@ -327,9 +256,6 @@ class UberChop : SuspendableScript() {
         super.onInitialize()
         // Prepare GUI resources
         try { gui.preload() } catch (_: Throwable) { }
-        try {
-            ensurePersistenceInitialized()
-        } catch (_: Throwable) { }
 
         // Load persisted settings before reading them
         loadSettings()
@@ -364,3 +290,4 @@ class UberChop : SuspendableScript() {
         return selectedLocation()?.bank
     }
 }
+

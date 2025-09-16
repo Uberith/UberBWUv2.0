@@ -1,5 +1,6 @@
 package com.uberith.uberchop.gui
 
+import com.uberith.api.game.skills.woodcutting.Trees
 import com.uberith.uberchop.UberChop
 import net.botwithus.imgui.ImGui
 import net.botwithus.ui.workspace.Workspace
@@ -732,14 +733,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         }
 
         // Dynamic Location combo (options change with selected tree)
-        val curTreeLower = script.targetTree.lowercase()
-        val filtered = script.treeLocations.filter { loc ->
-            loc.availableTrees.any { at ->
-                val a = at.lowercase()
-                a.contains(curTreeLower) || curTreeLower.contains(a)
-            }
-        }
-        // If tree changed and current location is no longer valid, reset to first valid
+        val filtered = Trees.locationsFor(script.targetTree).ifEmpty { script.treeLocations }
         if (treeChanged && filtered.none { it.name == script.location }) {
             val fallback = filtered.firstOrNull()?.name ?: script.treeLocations.firstOrNull()?.name ?: ""
             script.location = fallback

@@ -1,5 +1,6 @@
 package com.uberith.uberchop
 
+import com.uberith.api.game.skills.woodcutting.Trees
 data class Settings(
     // Break handler
     var performRandomBreak: Boolean = true,
@@ -74,23 +75,7 @@ data class Settings(
 // Central list of supported tree types for selection and matching.
 // Names are matched using case-insensitive contains(...) in targeting logic.
 object TreeTypes {
-    val ALL: List<String> = listOf(
-        "Tree",            // Normal
-        "Oak",
-        "Willow",
-        "Maple",
-        "Yew",
-        "Magic",
-        "Elder",
-        "Acadia",
-        "Teak",
-        "Mahogany",
-        "Ivy",
-        "Arctic pine",
-        "Eucalyptus",
-        "Crystal",
-        "Bamboo"
-    )
+    val ALL: List<String> = Trees.allNamesCamelCase()
 }
 
 // Serializable container for user overrides of location tiles

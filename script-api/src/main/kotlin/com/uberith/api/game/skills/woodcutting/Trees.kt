@@ -80,6 +80,15 @@ object Trees {
 
     private val logger: org.slf4j.Logger = org.slf4j.LoggerFactory.getLogger(Trees::class.java)
 
+    fun resolveTreeType(name: String): TreeType? {
+        val norm = toTitleCase(name.trim())
+        return TreeType.values().firstOrNull { t ->
+            val disp = t.displayName
+            val short = disp.removeSuffix(" tree").removeSuffix(" Tree")
+            norm.equals(disp, ignoreCase = true) || norm.equals(short, ignoreCase = true)
+        }
+    }
+
     // Common preferred interaction actions for trees (include Ivy's "Chop")
     private val preferredActions = listOf("Chop down", "Cut down", "Chop")
 
@@ -185,12 +194,7 @@ object Trees {
      */
     fun chop(name: String): TreeChopRequest {
         val trimmed = name.trim()
-        val norm = toTitleCase(trimmed)
-        val type = TreeType.values().firstOrNull { t ->
-            val disp = t.displayName
-            val short = disp.removeSuffix(" tree").removeSuffix(" Tree")
-            norm.equals(disp, ignoreCase = true) || norm.equals(short, ignoreCase = true)
-        }
+        val type = resolveTreeType(trimmed)
         if (type != null) return chop(type)
 
         return TreeChopRequest(
@@ -300,11 +304,7 @@ object Trees {
     fun nearest(name: String): SceneObject? {
         val norm = toTitleCase(name.trim())
         logger.info("[Trees] nearest(name): raw='{}', normalized='{}'", name, norm)
-        val type = TreeType.values().firstOrNull { t ->
-            val disp = t.displayName
-            val short = disp.removeSuffix(" tree").removeSuffix(" Tree")
-            norm.equals(disp, ignoreCase = true) || norm.equals(short, ignoreCase = true)
-        }
+        val type = resolveTreeType(norm)
         if (type != null) {
             logger.info("[Trees] nearest(name): resolved to type='{}'", type.displayName)
             return nearest(type)
@@ -351,6 +351,22 @@ object Trees {
      */
     fun allWithCamelCaseNames(): List<Pair<TreeType, String>> =
         allTypes().map { it to toTitleCase(it.displayName) }
+
+    val locations: List<TreeLocation>
+        get() = TreeLocations.ALL
+
+    fun locationsFor(type: TreeType): List<TreeLocation> = TreeLocations.locationsFor(type)
+
+    fun locationsFor(name: String): List<TreeLocation> = TreeLocations.locationsFor(name)
+
+    fun resolveLocation(treeName: String, savedLocation: String?): TreeLocation? {
+        val candidates = locationsFor(treeName)
+        if (candidates.isEmpty()) return null
+        if (!savedLocation.isNullOrBlank()) {
+            candidates.firstOrNull { it.name.equals(savedLocation, ignoreCase = true) }?.let { return it }
+        }
+        return candidates.firstOrNull()
+    }
 
     private fun toTitleCase(text: String): String =
         text.trim()

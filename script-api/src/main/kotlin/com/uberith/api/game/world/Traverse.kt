@@ -1,4 +1,5 @@
 package com.uberith.api.game.world
+import com.uberith.api.SuspendableScript
 
 import net.botwithus.rs3.entities.LocalPlayer
 import net.botwithus.rs3.minimenu.Action
@@ -77,6 +78,32 @@ object Traverse {
      * Issues a MiniMenu WALK to [destination]. If very close (< 2 tiles) returns true without walking.
      * If target is beyond [MAX_LOCAL_DISTANCE], falls back to a single bresenham step.
      */
+    fun ensureWithin(target: Coordinate?, radius: Int, randomRadius: Int = 10, maxAttempts: Int = 32, useMinimap: Boolean = true): Boolean {
+        if (target == null) {
+            logger.warn("[Traverse#ensureWithin] Target coordinate is null")
+            return false
+        }
+        if (Coordinates.isPlayerWithinRadius(target, radius)) {
+            logger.info("[Traverse#ensureWithin] Already within radius {} of {}", radius, target)
+            return false
+        }
+        val candidate = Coordinates.randomReachableNear(target, randomRadius, maxAttempts)
+        val destination = candidate ?: target
+        val walked = walkTo(destination, useMinimap)
+        if (!walked && candidate != null && candidate != target) {
+            logger.warn("[Traverse#ensureWithin] Failed to walk to random candidate {}, falling back to target {}", destination, target)
+            return walkTo(target, useMinimap)
+        }
+        return walked
+    }
+
+    suspend fun ensureWithin(script: SuspendableScript, target: Coordinate?, radius: Int, randomRadius: Int = 10, maxAttempts: Int = 32, useMinimap: Boolean = true): Boolean {
+        val walked = ensureWithin(target, radius, randomRadius, maxAttempts, useMinimap)
+        if (walked) {
+            script.awaitTicks(1)
+        }
+        return walked
+    }
     fun walkTo(destination: Coordinate?, minimap: Boolean): Boolean {
         if (destination == null) {
             logger.warn("[Traverse#walkTo] Destination is null")
@@ -110,3 +137,6 @@ object Traverse {
         }
     }
 }
+
+
+

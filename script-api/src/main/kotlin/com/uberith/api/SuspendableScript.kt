@@ -1,6 +1,7 @@
 package com.uberith.api
 
 import net.botwithus.rs3.client.Client
+import net.botwithus.rs3.entities.LocalPlayer
 import net.botwithus.scripts.Script
 import kotlin.coroutines.createCoroutine
 
@@ -43,6 +44,20 @@ abstract class SuspendableScript : Script() {
         }
     }
 
+    suspend fun awaitIdle(timeout: Int = 10, includeMovement: Boolean = true): Boolean {
+        val deadline = Client.getServerTick() + timeout
+        while (Client.getServerTick() <= deadline) {
+            val player = LocalPlayer.self()
+            val animationIdle = (player?.animationId ?: -1) == -1
+            val movementIdle = !includeMovement || player?.isMoving != true
+            if (animationIdle && movementIdle) {
+                return true
+            }
+            awaitTicks(1)
+        }
+        return false
+    }
+
     // Kotlin-facing aliases preserving the original example names while avoiding JVM method name clashes
     @JvmName("waitTicksAlias")
     @Suppress("unused")
@@ -71,3 +86,4 @@ abstract class SuspendableScript : Script() {
         }
     }
 }
+
