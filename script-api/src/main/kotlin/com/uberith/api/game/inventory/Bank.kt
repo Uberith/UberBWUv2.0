@@ -24,7 +24,7 @@ package com.uberith.api.game.inventory
  * - Defensive checks are included around null components, empty result sets, and option availability.
  */
 
-import com.uberith.api.SuspendableScript
+import com.uberith.api.script.SuspendableScript
 import com.uberith.api.game.query.ComponentQuery
 import com.uberith.api.game.query.InventoryItemQuery
 import com.uberith.api.game.query.SceneObjectQuery
@@ -41,7 +41,7 @@ import net.botwithus.rs3.minimenu.MiniMenu
 import net.botwithus.rs3.vars.VarDomain
 import net.botwithus.rs3.world.Distance
 import net.botwithus.util.Rand
-import com.uberith.api.script.permissive.base.PermissiveScript
+import com.uberith.api.script.PermissiveScript
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import java.util.*

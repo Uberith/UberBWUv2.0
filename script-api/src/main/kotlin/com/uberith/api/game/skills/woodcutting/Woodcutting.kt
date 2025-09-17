@@ -1,6 +1,6 @@
 package com.uberith.api.game.skills.woodcutting
 
-import com.uberith.api.SuspendableScript
+import com.uberith.api.script.SuspendableScript
 import com.uberith.api.game.inventory.Backpack
 import com.uberith.api.game.inventory.Bank
 import com.uberith.api.game.items.BirdNests

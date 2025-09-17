@@ -1,4 +1,4 @@
-package com.uberith.api.script.permissive.base
+package com.uberith.api.script
 
 open class PermissiveScript {
     open fun info(message: String) {}

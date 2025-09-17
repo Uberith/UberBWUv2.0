@@ -1,5 +1,5 @@
 package com.uberith.api.game.world
-import com.uberith.api.SuspendableScript
+import com.uberith.api.script.SuspendableScript
 
 import net.botwithus.rs3.entities.LocalPlayer
 import net.botwithus.rs3.minimenu.Action

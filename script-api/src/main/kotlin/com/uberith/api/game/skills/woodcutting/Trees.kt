@@ -1,6 +1,6 @@
 package com.uberith.api.game.skills.woodcutting
 
-import com.uberith.api.SuspendableScript
+import com.uberith.api.script.SuspendableScript
 import com.uberith.api.nearest
 import com.uberith.api.game.query.SceneObjectQuery
 import net.botwithus.rs3.entities.SceneObject

@@ -1,6 +1,6 @@
 package com.uberith.api.script
 
-import com.uberith.api.SuspendableScript
+import com.uberith.api.script.SuspendableScript
 import com.uberith.api.utils.ConfigStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

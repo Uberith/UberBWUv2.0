@@ -1,9 +1,13 @@
-package com.uberith.api
+package com.uberith.api.script
 
 import net.botwithus.rs3.client.Client
 import net.botwithus.rs3.entities.LocalPlayer
 import net.botwithus.scripts.Script
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.createCoroutine
+import kotlin.coroutines.suspendCoroutine
 
 /**
  * Suspendable tick-driven script base.
@@ -11,7 +15,7 @@ import kotlin.coroutines.createCoroutine
  */
 abstract class SuspendableScript : Script() {
 
-    private var continuation: kotlin.coroutines.Continuation<Unit>? = null
+    private var continuation: Continuation<Unit>? = null
     private var isSuspended = false
     private var targetTick = 0
 
@@ -29,7 +33,7 @@ abstract class SuspendableScript : Script() {
     }
 
     suspend fun awaitTicks(ticks: Int) {
-        kotlin.coroutines.suspendCoroutine<Unit> { cont ->
+        suspendCoroutine<Unit> { cont ->
             continuation = cont
             isSuspended = true
             targetTick = Client.getServerTick() + ticks
@@ -79,11 +83,10 @@ abstract class SuspendableScript : Script() {
         c.resumeWith(Result.success(Unit))
     }
 
-    private object LoggingCompletion : kotlin.coroutines.Continuation<Unit> {
-        override val context: kotlin.coroutines.CoroutineContext = kotlin.coroutines.EmptyCoroutineContext
+    private object LoggingCompletion : Continuation<Unit> {
+        override val context: CoroutineContext = EmptyCoroutineContext
         override fun resumeWith(result: Result<Unit>) {
             result.exceptionOrNull()?.let { println(it) }
         }
     }
 }
-
