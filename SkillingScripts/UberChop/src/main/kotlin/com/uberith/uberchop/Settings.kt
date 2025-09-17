@@ -5,12 +5,16 @@ import com.uberith.api.script.handlers.AfkSettings
 import com.uberith.api.script.handlers.BreakSettings
 import com.uberith.api.script.handlers.LogoutSettings
 import com.uberith.api.script.handlers.WorldHopSettings
+import com.uberith.api.game.skills.woodcutting.LogHandlingMode
 
 /** Persisted configuration for UberChop. */
 data class UberChopSettings(
     val treeIndex: Int = 0,
     val locationName: String = "",
     val withdrawWoodBox: Boolean = false,
+    val pickupNests: Boolean = false,
+    val logHandling: LogHandlingMode = LogHandlingMode.BANK,
+    val enableTreeRotation: Boolean = false,
     val customLocations: Map<String, CustomLocation> = emptyMap(),
     val breakSettings: BreakSettings = BreakSettings(),
     val logoutSettings: LogoutSettings = LogoutSettings(),
@@ -34,3 +38,4 @@ data class CustomLocation(
 object TreeTypes {
     val ALL: List<String> = Trees.allNamesCamelCase()
 }
+

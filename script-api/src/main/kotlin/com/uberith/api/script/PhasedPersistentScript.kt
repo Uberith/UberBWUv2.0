@@ -1,12 +1,15 @@
 package com.uberith.api.script
 
-import com.uberith.api.game.skills.woodcutting.WoodcuttingSession
 import org.slf4j.Logger
 
 /**
- * Base class for woodcutting-focused scripts with lifecycle helpers and a phase loop DSL.
+ * Generic phase-driven script base with persistent settings, runtime tracking, and a DSL loop.
+ *
+ * @param T settings model type
+ * @param P enum representing script phases
+ * @param C context object constructed on activation and exposed during loops
  */
-abstract class WoodcuttingScript<T : Any, P : Enum<P>>(
+abstract class PhasedPersistentScript<T : Any, P : Enum<P>, C : Any>(
     moduleName: String,
     settingsClass: Class<T>,
     defaultFactory: () -> T,
@@ -18,20 +21,22 @@ abstract class WoodcuttingScript<T : Any, P : Enum<P>>(
     protected val phases = PhaseLoop(initialPhase, phaseLogger)
 
     private var loopStarted = false
-    private val loopContext = ScriptLoop()
+    private lateinit var loopContext: C
+    private val loop = ScriptLoop()
 
-    protected abstract fun createWoodcuttingSession(): WoodcuttingSession
+    /** Create the context object used throughout the script lifecycle (per activation). */
+    protected abstract fun createContext(): C
 
-    private lateinit var woodcuttingSession: WoodcuttingSession
-
+    /** Optional hook that runs once before the main loop starts. Return true to skip the current tick. */
     protected open suspend fun ScriptLoop.onStart(): Boolean = false
 
+    /** Primary loop body. Return true to skip the default one-tick wait. */
     protected abstract suspend fun ScriptLoop.onTick(): Boolean
 
     override fun onActivation() {
         super.onActivation()
         runtime.start()
-        woodcuttingSession = createWoodcuttingSession()
+        loopContext = createContext()
         loopStarted = false
     }
 
@@ -44,19 +49,15 @@ abstract class WoodcuttingScript<T : Any, P : Enum<P>>(
         runtime.mark()
         if (!loopStarted) {
             loopStarted = true
-            if (loopContext.onStart()) {
-                return
-            }
+            if (loop.onStart()) return
         }
-        if (loopContext.onTick()) {
-            return
-        }
+        if (loop.onTick()) return
         awaitTicks(1)
     }
 
     protected inner class ScriptLoop internal constructor() {
-        val woodcutting: WoodcuttingSession
-            get() = woodcuttingSession
+        val context: C
+            get() = loopContext
 
         fun currentPhase(): P = phases.phase
 
@@ -77,8 +78,8 @@ abstract class WoodcuttingScript<T : Any, P : Enum<P>>(
             val phase: P
                 get() = phases.phase
 
-            val woodcutting: WoodcuttingSession
-                get() = woodcuttingSession
+            val context: C
+                get() = loopContext
 
             fun transitionTo(target: P, message: String? = null): PhaseDecision<P> =
                 this@ScriptLoop.transitionTo(target, message)

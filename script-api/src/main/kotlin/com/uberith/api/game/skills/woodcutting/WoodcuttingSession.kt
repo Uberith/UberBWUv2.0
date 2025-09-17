@@ -3,10 +3,16 @@ package com.uberith.api.game.skills.woodcutting
 import com.uberith.api.SuspendableScript
 import com.uberith.api.game.inventory.Backpack
 import com.uberith.api.game.inventory.Bank
+import com.uberith.api.game.items.BirdNests
 import com.uberith.api.game.world.Traverse
 import net.botwithus.rs3.world.Coordinate
 import org.slf4j.Logger
 import java.util.regex.Pattern
+
+enum class LogHandlingMode {
+    BANK,
+    DROP
+}
 
 /**
  * High-level woodcutting orchestration that stitches together movement, banking, and chopping.
@@ -15,6 +21,8 @@ class WoodcuttingSession(
     private val script: SuspendableScript,
     private val logger: Logger,
     private val withdrawWoodBox: () -> Boolean,
+    private val pickupBirdNests: () -> Boolean,
+    private val logHandling: () -> LogHandlingMode,
     private val chopTile: () -> Coordinate?,
     private val bankTile: () -> Coordinate?
 ) {
@@ -61,13 +69,32 @@ class WoodcuttingSession(
             if (withdrawWoodBox()) {
                 val filled = WoodcuttingEquipment.fillWoodBox(script)
                 if (filled) {
-                    return if (Backpack.isFull()) ChopOutcome.NEEDS_BANK else ChopOutcome.WAITED
+                    logger.info("Filled wood box to free backpack space")
+                    return ChopOutcome.WAITED
+                }
+            }
+            if (logHandling() == LogHandlingMode.DROP) {
+                val dropped = dropLogs()
+                if (dropped) {
+                    return ChopOutcome.WAITED
                 }
             }
             return ChopOutcome.NEEDS_BANK
         }
 
         script.awaitIdle()
+
+        if (pickupBirdNests()) {
+            val nest = BirdNests.nearest()
+            if (nest != null) {
+                val result = nest.interact("Take")
+                if (result > 0) {
+                    logger.info("Picked up bird's nest from ground")
+                    script.awaitTicks(2)
+                    return ChopOutcome.WAITED
+                }
+            }
+        }
 
         if (Traverse.ensureWithin(script, chopTile(), 40)) {
             return ChopOutcome.WAITED
@@ -80,6 +107,22 @@ class WoodcuttingSession(
 
         logger.debug("No target '{}' nearby", targetTree)
         return ChopOutcome.NONE
+    }
+
+
+    private suspend fun dropLogs(): Boolean {
+        val items = Backpack.getItems().filter { logsPattern.matcher(it.name).find() }
+        var dropped = false
+        for (item in items) {
+            if (Backpack.interact(item, "Drop")) {
+                dropped = true
+                script.awaitTicks(1)
+            }
+        }
+        if (dropped) {
+            logger.info("Dropped logs to free inventory space")
+        }
+        return dropped
     }
 
     private suspend fun openBankIfNeeded(): Boolean {

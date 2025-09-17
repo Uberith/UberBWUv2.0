@@ -3,6 +3,7 @@ module UberChop {
     requires BotWithUs.api;
     requires BotWithUs.imgui;
     requires BotWithUs.navigation.api;
+    requires kotlinx.coroutines.core;
     requires org.slf4j;
     requires com.google.gson;
     requires static xapi;

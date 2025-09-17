@@ -1,6 +1,6 @@
 package com.uberith.uberchop
 
-import com.uberith.api.script.WoodcuttingScript
+import com.uberith.api.script.PhasedPersistentScript
 import com.uberith.api.game.skills.woodcutting.TreeLocation
 import com.uberith.uberchop.TreeTypes
 import com.uberith.api.game.skills.woodcutting.Trees
@@ -23,7 +23,7 @@ import org.slf4j.LoggerFactory
     version = "0.5.0",
     author = "Uberith"
 )
-class UberChop : WoodcuttingScript<UberChopSettings, Phase>(
+class UberChop : PhasedPersistentScript<UberChopSettings, Phase, WoodcuttingSession>(
     moduleName = "UberChop",
     settingsClass = UberChopSettings::class.java,
     defaultFactory = { UberChopSettings() },
@@ -105,11 +105,13 @@ class UberChop : WoodcuttingScript<UberChopSettings, Phase>(
         applyHandlerSettings(snapshot)
     }
 
-    override fun createWoodcuttingSession(): WoodcuttingSession {
+    override fun createContext(): WoodcuttingSession {
         return WoodcuttingSession(
             script = this,
             logger = logger,
             withdrawWoodBox = { settingsSnapshot().withdrawWoodBox },
+            pickupBirdNests = { settingsSnapshot().pickupNests },
+            logHandling = { settingsSnapshot().logHandling },
             chopTile = { effectiveChopCoordinate() },
             bankTile = { effectiveBankCoordinate() }
         )
@@ -117,7 +119,7 @@ class UberChop : WoodcuttingScript<UberChopSettings, Phase>(
 
     override suspend fun ScriptLoop.onStart(): Boolean {
         status = "Preparing"
-        return woodcutting.prepare()
+        return session.prepare()
     }
 
     override suspend fun ScriptLoop.onTick(): Boolean {
@@ -136,12 +138,12 @@ class UberChop : WoodcuttingScript<UberChopSettings, Phase>(
                 Phase.READY -> transitionTo(Phase.PREPARING)
                 Phase.PREPARING -> {
                     status = "Preparing"
-                    if (woodcutting.prepare()) stay() else transitionTo(Phase.CHOPPING, "Phase: PREPARING -> CHOPPING")
+                    if (session.prepare()) stay() else transitionTo(Phase.CHOPPING, "Phase: PREPARING -> CHOPPING")
                 }
                 Phase.CHOPPING -> {
                     val targetTree = resolveTreeName(settingsSnapshot().treeIndex)
                     status = "Chopping $targetTree"
-                    when (woodcutting.chop(targetTree)) {
+                    when (session.chop(targetTree)) {
                         WoodcuttingSession.ChopOutcome.WAITED -> stay()
                         WoodcuttingSession.ChopOutcome.STARTED -> {
                             runtime.increment(LOG_COUNTER)
@@ -149,7 +151,9 @@ class UberChop : WoodcuttingScript<UberChopSettings, Phase>(
                         }
                         WoodcuttingSession.ChopOutcome.NEEDS_BANK -> transitionTo(Phase.BANKING, "Phase: CHOPPING -> BANKING")
                         WoodcuttingSession.ChopOutcome.NONE -> {
-                            if (worldHopPolicy.shouldHop(playersNearby = 0, resourcesRemaining = 0)) {
+                            if (maybeRotateLocation(targetTree)) {
+                                stay()
+                            } else if (worldHopPolicy.shouldHop(playersNearby = 0, resourcesRemaining = 0)) {
                                 status = "Considering world hop"
                                 stay()
                             } else {
@@ -160,7 +164,7 @@ class UberChop : WoodcuttingScript<UberChopSettings, Phase>(
                 }
                 Phase.BANKING -> {
                     status = "Banking"
-                    when (woodcutting.bankInventory()) {
+                    when (session.bankInventory()) {
                         WoodcuttingSession.BankOutcome.WAITED -> stay()
                         WoodcuttingSession.BankOutcome.INVENTORY_READY -> transitionTo(Phase.CHOPPING, "Phase: BANKING -> CHOPPING")
                     }
@@ -216,6 +220,28 @@ class UberChop : WoodcuttingScript<UberChopSettings, Phase>(
             if (bx != null && by != null && bz != null) return Coordinate(bx, by, bz)
         }
         return selectedLocation()?.bank
+    }
+
+    private val ScriptLoop.session: WoodcuttingSession
+        get() = context
+
+    private val ScriptLoop.PhaseMachine.session: WoodcuttingSession
+        get() = context
+
+    private fun maybeRotateLocation(treeName: String): Boolean {
+        val snapshot = settingsSnapshot()
+        if (!snapshot.enableTreeRotation) return false
+        val locations = Trees.locationsFor(treeName)
+        if (locations.isEmpty()) return false
+        val currentName = snapshot.locationName
+        val currentIndex = locations.indexOfFirst { it.name.equals(currentName, ignoreCase = true) }
+        val nextIndex = if (currentIndex == -1 || currentIndex + 1 >= locations.size) 0 else currentIndex + 1
+        val next = locations[nextIndex]
+        if (next.name.equals(currentName, ignoreCase = true)) return false
+        status = "Rotating to ${next.name}"
+        mutateSettings { it.copy(locationName = next.name) }
+        logger.info("Rotated location to {}", next.name)
+        return true
     }
 
     private fun applyHandlerSettings(settings: UberChopSettings) {

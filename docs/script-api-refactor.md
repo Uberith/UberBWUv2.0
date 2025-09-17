@@ -15,7 +15,7 @@
 | `RuntimeTracker` | Runtime + counter bookkeeping | `start()`, `mark()`, `snapshot()` |
 | `PhaseLoop` | Enum-based phase state machine | `phase`, `transition()`, `on()` |
 | `WoodcuttingSession` | High-level bank/chop orchestration | `prepare()`, `chop()`, `bankInventory()` |
-| `WoodcuttingScript<T, P>` | High-level woodcutting script base with DSL loop | `ScriptLoop.phaseLoop { ... }`, `runtime` |
+| `PhasedPersistentScript<T, P, C>` | Generic persistent script base with phase DSL and injectable context | `ScriptLoop.context`, `phaseLoop { ... }`, `runtime` |
 | `handlers/BreakScheduler` | Periodic AFK break executor | `update()`, `tick()` |
 | `handlers/AfkJitter` | Short jitter idles | `update()`, `tick()` |
 | `handlers/LogoutGuard` | Signals when runtime/goal thresholds met | `shouldLogout()` |
@@ -25,9 +25,10 @@
 
 ## Migration Notes
 
-1. Scripts extend `WoodcuttingScript<T, Phase>` and implement two DSL hooks:
+1. Scripts extend `PhasedPersistentScript` and implement:
    ```kotlin
-   override suspend fun ScriptLoop.onStart() = woodcutting.prepare()
+   override fun createContext(): ContextType
+   override suspend fun ScriptLoop.onStart() = false
    override suspend fun ScriptLoop.onTick() = phaseLoop { ... }
    ```
 2. Settings models reference handler settings (`BreakSettings`, `AfkSettings`, etc.) so they are persisted automatically.
