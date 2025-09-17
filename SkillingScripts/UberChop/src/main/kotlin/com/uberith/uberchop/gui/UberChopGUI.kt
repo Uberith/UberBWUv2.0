@@ -6,6 +6,8 @@ import com.uberith.uberchop.CustomLocation
 import com.uberith.uberchop.UberChop
 import com.uberith.uberchop.UberChopSettings
 import net.botwithus.imgui.ImGui
+import net.botwithus.rs3.entities.LocalPlayer
+import net.botwithus.rs3.world.ClientState
 import net.botwithus.ui.workspace.Workspace
 import net.botwithus.xapi.script.ui.interfaces.BuildableUI
 import java.nio.charset.StandardCharsets
@@ -16,6 +18,16 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
 
     private var currentTab: Int = 0
     private var debugSelectable: Boolean = false
+    private val navItems = listOf(
+        "Overview",
+        "Core",
+        "Handlers",
+        "World Hop",
+        "Advanced",
+        "Stats",
+        "Support",
+        "Debug"
+    )
 
     fun preload() {}
 
@@ -41,21 +53,44 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         ImGui.text("Status ${script.statusText()}  |  WC lvl ${script.playerWoodcuttingLevel()}  |  Phase ${script.phase()}")
         ImGui.separator()
 
-        val tabs = listOf("Overview", "Core", "Handlers", "World Hop", "Advanced", "Stats", "Support", "Debug")
-        ImGuiWidgets.tabs(id = "UberChopTabs", labels = tabs, currentIndex = currentTab, onSelect = { index ->
-            currentTab = index
-        })
+        val navWidth = 140f
+        val contentHeight = 420f
+        val navItemHeight = (contentHeight / navItems.size).coerceAtLeast(26f)
 
-        when (currentTab) {
-            0 -> drawOverview(settings, treeNames)
-            1 -> drawCore(settings, treeNames)
-            2 -> drawHandlers(settings)
-            3 -> drawWorldHop(settings)
-            4 -> drawAdvanced(settings)
-            5 -> drawStats(settings, treeNames)
-            6 -> drawSupport()
-            7 -> drawDebug()
+        if (ImGui.beginChild("UberChopLeftNav", navWidth, contentHeight, true, 0)) {
+            navItems.forEachIndexed { index, label ->
+                val isSelected = index == currentTab
+                if (ImGui.selectable(label, isSelected, 0, navWidth - 12f, navItemHeight)) {
+                    currentTab = index
+                }
+            }
         }
+        ImGui.endChild()
+
+        ImGui.sameLine(0f, 12f)
+
+        if (ImGui.beginChild("UberChopContent", 0f, contentHeight, true, 0)) {
+            when (currentTab) {
+                0 -> drawOverview(settings, treeNames)
+                1 -> drawCore(settings, treeNames)
+                2 -> drawHandlers(settings)
+                3 -> drawWorldHop(settings)
+                4 -> drawAdvanced(settings)
+                5 -> drawStats(settings, treeNames)
+                6 -> drawSupport()
+                7 -> drawDebug()
+            }
+        }
+        ImGui.endChild()
+
+        ImGui.separator()
+
+        val worldId = ClientState.GAME.id
+        val player = LocalPlayer.self()
+        val coordText = player?.coordinate?.toString() ?: "Unknown"
+        val animId = player?.animationId ?: -1
+        val animText = if (animId >= 0) animId.toString() else "Idle"
+        ImGui.text("World $worldId | XYZ $coordText | Anim $animText")
 
         ImGui.end()
     }

@@ -3,6 +3,13 @@ package com.uberith.uberchop
 import com.uberith.api.script.PhasedPersistentScript
 import com.uberith.api.game.skills.woodcutting.TreeLocation
 import com.uberith.uberchop.TreeTypes
+import com.uberith.api.game.skills.woodcutting.LogHandlingMode
+import com.uberith.api.script.handlers.AfkSettings
+import com.uberith.api.script.handlers.BreakSettings
+import com.uberith.api.script.handlers.LogoutSettings
+import com.uberith.api.script.handlers.WorldHopSettings
+import com.uberith.api.utils.ConfigFiles
+import com.google.gson.GsonBuilder
 import com.uberith.api.game.skills.woodcutting.Trees
 import com.uberith.api.game.skills.woodcutting.WoodcuttingSession
 import com.uberith.api.script.handlers.AfkJitter
@@ -31,6 +38,10 @@ class UberChop : PhasedPersistentScript<UberChopSettings, Phase, WoodcuttingSess
     phaseLogger = LoggerFactory.getLogger("UberChopPhases")
 ) {
 
+    companion object {
+        private const val MODULE_NAME = "UberChop"
+    }
+
     private val logger: Logger = LoggerFactory.getLogger(this.javaClass)
 
     private val breakScheduler = BreakScheduler()
@@ -45,7 +56,23 @@ class UberChop : PhasedPersistentScript<UberChopSettings, Phase, WoodcuttingSess
 
     private val LOG_COUNTER = "logs"
 
+    private fun migrateLegacySettings() {
+        val raw = ConfigFiles.readModuleSettings(MODULE_NAME) ?: return
+        if (raw.contains("breakSettings")) return
+        val gson = GsonBuilder().create()
+        try {
+            val legacy = gson.fromJson(raw, LegacySettings::class.java) ?: return
+            val converted = legacy.toUberChopSettings()
+            val pretty = GsonBuilder().setPrettyPrinting().create().toJson(converted, UberChopSettings::class.java)
+            ConfigFiles.writeModuleSettings(MODULE_NAME, pretty)
+            logger.info("Migrated legacy UberChop settings to new format")
+        } catch (t: Throwable) {
+            logger.warn("Unable to migrate legacy UberChop settings: {}", t.message)
+        }
+    }
+
     override fun onInitialize() {
+        migrateLegacySettings()
         super.onInitialize()
         ensureSettingsLoaded()
     }
@@ -250,4 +277,142 @@ class UberChop : PhasedPersistentScript<UberChopSettings, Phase, WoodcuttingSess
         afkJitter.update(settings.afkSettings)
         worldHopPolicy.update(settings.worldHopSettings)
     }
+}
+
+private data class LegacySettings(
+    val savedTreeType: Int? = null,
+    val savedLocation: String? = null,
+    val withdrawWoodBox: Boolean? = null,
+    val pickupNests: Boolean? = null,
+    val logHandlingMode: Int? = null,
+    val enableTreeRotation: Boolean? = null,
+    val customLocations: Map<String, LegacyCustomLocation>? = null,
+    val performRandomBreak: Boolean? = null,
+    val breakFrequency: Int? = null,
+    val minBreak: Int? = null,
+    val maxBreak: Int? = null,
+    val enableAfk: Boolean? = null,
+    val afkEveryMin: Int? = null,
+    val afkEveryMax: Int? = null,
+    val afkDurationMin: Int? = null,
+    val afkDurationMax: Int? = null,
+    val enableAutoStop: Boolean? = null,
+    val stopAfterHours: Int? = null,
+    val stopAfterMinutes: Int? = null,
+    val stopAfterLogs: Int? = null,
+    val stopAfterXp: Int? = null,
+    val logoutDurationEnable: Boolean? = null,
+    val logoutHours: Int? = null,
+    val logoutMinutes: Int? = null,
+    val logoutSeconds: Int? = null,
+    val enableWorldHopping: Boolean? = null,
+    val hopOnCrowd: Boolean? = null,
+    val hopOnNoTrees: Boolean? = null,
+    val playerThreshold: Int? = null,
+    val hopDelayMs: Int? = null
+)
+
+private data class LegacyCustomLocation(
+    val chopX: Int? = null,
+    val chopY: Int? = null,
+    val chopZ: Int? = null,
+    val bankX: Int? = null,
+    val bankY: Int? = null,
+    val bankZ: Int? = null
+)
+
+private fun LegacySettings.toUberChopSettings(): UberChopSettings {
+    val defaultBreaks = BreakSettings()
+    val breaksPerHour = breakFrequency ?: 0
+    val computedFrequency = when {
+        performRandomBreak != true -> defaultBreaks.frequencyMinutes
+        breaksPerHour <= 0 -> defaultBreaks.frequencyMinutes
+        else -> (60 / breaksPerHour).coerceAtLeast(5)
+    }
+    val minBreakSeconds = (minBreak ?: defaultBreaks.minDurationSeconds).coerceAtLeast(10)
+    val maxBreakSeconds = (maxBreak ?: defaultBreaks.maxDurationSeconds).coerceAtLeast(minBreakSeconds)
+    val breakSettings = BreakSettings(
+        enabled = performRandomBreak == true,
+        frequencyMinutes = computedFrequency,
+        varianceMinutes = 0,
+        minDurationSeconds = minBreakSeconds,
+        maxDurationSeconds = maxBreakSeconds
+    )
+
+    val defaultAfk = AfkSettings()
+    val minEvery = (afkEveryMin ?: defaultAfk.minEveryMinutes).coerceAtLeast(1)
+    val maxEvery = (afkEveryMax ?: defaultAfk.maxEveryMinutes).coerceAtLeast(minEvery)
+    val minAfkSeconds = (afkDurationMin ?: defaultAfk.minDurationSeconds).coerceAtLeast(5)
+    val maxAfkSeconds = (afkDurationMax ?: defaultAfk.maxDurationSeconds).coerceAtLeast(minAfkSeconds)
+    val afkSettings = AfkSettings(
+        enabled = enableAfk == true,
+        minEveryMinutes = minEvery,
+        maxEveryMinutes = maxEvery,
+        minDurationSeconds = minAfkSeconds,
+        maxDurationSeconds = maxAfkSeconds
+    )
+
+    val defaultLogout = LogoutSettings()
+    val logoutEnabled = (enableAutoStop == true) || (logoutDurationEnable == true)
+    val durationHours = when {
+        logoutDurationEnable == true -> logoutHours
+        enableAutoStop == true -> stopAfterHours
+        else -> null
+    }?.coerceAtLeast(0) ?: defaultLogout.maxHours
+    val baseMinutes = when {
+        logoutDurationEnable == true -> logoutMinutes
+        enableAutoStop == true -> stopAfterMinutes
+        else -> null
+    }?.coerceAtLeast(0) ?: defaultLogout.maxMinutes
+    val extraMinutes = if (logoutDurationEnable == true) ((logoutSeconds ?: 0).coerceAtLeast(0) / 60) else 0
+    val logoutSettings = LogoutSettings(
+        enabled = logoutEnabled,
+        maxHours = durationHours,
+        maxMinutes = (baseMinutes + extraMinutes).coerceAtLeast(0),
+        targetXpGained = if (enableAutoStop == true) (stopAfterXp ?: 0).coerceAtLeast(0) else defaultLogout.targetXpGained,
+        targetActions = if (enableAutoStop == true) (stopAfterLogs ?: 0).coerceAtLeast(0).toLong() else defaultLogout.targetActions
+    )
+
+    val defaultHop = WorldHopSettings()
+    val hopCooldownSeconds = when {
+        hopDelayMs != null && hopDelayMs > 0 -> (hopDelayMs / 1000).coerceAtLeast(10)
+        else -> defaultHop.hopCooldownSeconds
+    }
+    val worldHopSettings = WorldHopSettings(
+        enabled = enableWorldHopping == true,
+        hopOnCrowd = hopOnCrowd == true,
+        playerThreshold = (playerThreshold ?: defaultHop.playerThreshold).coerceAtLeast(1),
+        hopOnNoResources = hopOnNoTrees == true,
+        hopCooldownSeconds = hopCooldownSeconds
+    )
+
+    val convertedCustomLocations = customLocations?.mapValues { (_, value) ->
+        CustomLocation(
+            chopX = value.chopX,
+            chopY = value.chopY,
+            chopZ = value.chopZ,
+            bankX = value.bankX,
+            bankY = value.bankY,
+            bankZ = value.bankZ
+        )
+    } ?: emptyMap()
+
+    val handling = when (logHandlingMode) {
+        1 -> LogHandlingMode.DROP
+        else -> LogHandlingMode.BANK
+    }
+
+    return UberChopSettings(
+        treeIndex = savedTreeType ?: 0,
+        locationName = savedLocation ?: "",
+        withdrawWoodBox = withdrawWoodBox ?: false,
+        pickupNests = pickupNests ?: false,
+        logHandling = handling,
+        enableTreeRotation = enableTreeRotation ?: false,
+        customLocations = convertedCustomLocations,
+        breakSettings = breakSettings,
+        logoutSettings = logoutSettings,
+        afkSettings = afkSettings,
+        worldHopSettings = worldHopSettings
+    )
 }

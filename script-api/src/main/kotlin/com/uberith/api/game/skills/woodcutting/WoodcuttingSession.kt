@@ -54,7 +54,10 @@ class WoodcuttingSession(
         if (withdrawWoodBox()) {
             val emptied = WoodcuttingEquipment.emptyWoodBox(script)
             if (emptied) {
-                return BankOutcome.WAITED
+                if (!Backpack.isFull()) {
+                    return BankOutcome.WAITED
+                }
+                logger.info("Wood box empty did not free backpack space; depositing logs")
             }
         }
 
@@ -66,9 +69,19 @@ class WoodcuttingSession(
 
     suspend fun chop(targetTree: String): ChopOutcome {
         if (Backpack.isFull()) {
-            if (withdrawWoodBox()) {
+            var attemptedWoodBoxFill = false
+            if (WoodcuttingEquipment.hasWoodBox()) {
+                attemptedWoodBoxFill = true
                 val filled = WoodcuttingEquipment.fillWoodBox(script)
-                if (filled) {
+                if (filled && !Backpack.isFull()) {
+                    logger.info("Filled wood box to free backpack space")
+                    return ChopOutcome.WAITED
+                }
+            }
+            if (!attemptedWoodBoxFill && withdrawWoodBox()) {
+                attemptedWoodBoxFill = true
+                val filled = WoodcuttingEquipment.fillWoodBox(script)
+                if (filled && !Backpack.isFull()) {
                     logger.info("Filled wood box to free backpack space")
                     return ChopOutcome.WAITED
                 }
@@ -78,6 +91,9 @@ class WoodcuttingSession(
                 if (dropped) {
                     return ChopOutcome.WAITED
                 }
+            }
+            if (attemptedWoodBoxFill) {
+                logger.info("Backpack remains full after attempting to fill wood box; banking")
             }
             return ChopOutcome.NEEDS_BANK
         }
