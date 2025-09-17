@@ -3,7 +3,7 @@ package com.uberith.api.game.items
 import com.uberith.api.nearest
 import com.uberith.api.game.query.result.ResultSet
 import net.botwithus.rs3.item.GroundItem
-import net.botwithus.xapi.query.GroundItemQuery
+import com.uberith.api.game.query.GroundItemQuery
 import java.util.regex.Pattern
 
 /**
@@ -27,3 +27,4 @@ object BirdNests {
     /** Returns the nearest bird's nest ground item, or null when none are visible. */
     fun nearest(): GroundItem? = groundItems().nearest()
 }
+

@@ -1,6 +1,6 @@
 package com.uberith.uberchop.gui
 
-import com.uberith.api.game.skills.woodcutting.LogHandlingMode
+import com.uberith.api.game.skills.woodcutting.internal.LogHandlingMode
 import com.uberith.api.ui.imgui.ImGuiWidgets
 import com.uberith.uberchop.CustomLocation
 import com.uberith.uberchop.UberChop
@@ -10,14 +10,10 @@ import net.botwithus.rs3.entities.LocalPlayer
 import net.botwithus.rs3.world.ClientState
 import net.botwithus.ui.workspace.Workspace
 import net.botwithus.xapi.script.ui.interfaces.BuildableUI
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
-import java.nio.file.Paths
 
 class UberChopGUI(private val script: UberChop) : BuildableUI {
 
     private var currentTab: Int = 0
-    private var debugSelectable: Boolean = false
     private val navItems = listOf(
         "Overview",
         "Core",
@@ -25,8 +21,7 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         "World Hop",
         "Advanced",
         "Stats",
-        "Support",
-        "Debug"
+        "Support"
     )
 
     fun preload() {}
@@ -42,6 +37,9 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
     private fun renderInternal() {
         val settings = script.settingsSnapshot()
         val treeNames = script.treeNames()
+        if (currentTab >= navItems.size) {
+            currentTab = navItems.lastIndex
+        }
 
         ImGui.setNextWindowSize(560f, 540f)
         if (!ImGui.begin("UberChop", 0)) {
@@ -78,7 +76,6 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
                 4 -> drawAdvanced(settings)
                 5 -> drawStats(settings, treeNames)
                 6 -> drawSupport()
-                7 -> drawDebug()
             }
         }
         ImGui.endChild()
@@ -157,14 +154,6 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             ImGui.endCombo()
         }
 
-        ImGuiWidgets.toggle("Withdraw wood box", settings.withdrawWoodBox) { updated ->
-            script.mutateSettings { it.copy(withdrawWoodBox = updated) }
-        }
-
-        ImGuiWidgets.toggle("Pickup bird nests", settings.pickupNests) { updated ->
-            script.mutateSettings { it.copy(pickupNests = updated) }
-        }
-
         val logModes = LogHandlingMode.values()
         val currentMode = settings.logHandling
         if (ImGui.beginCombo("Log handling", currentMode.label(), 0)) {
@@ -177,6 +166,15 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
             }
             ImGui.endCombo()
         }
+
+        ImGuiWidgets.toggle("Withdraw wood box", settings.withdrawWoodBox) { updated ->
+            script.mutateSettings { it.copy(withdrawWoodBox = updated) }
+        }
+
+        ImGuiWidgets.toggle("Pickup bird nests", settings.pickupNests) { updated ->
+            script.mutateSettings { it.copy(pickupNests = updated) }
+        }
+
     }
 
     private fun drawHandlers(settings: UberChopSettings) {
@@ -336,31 +334,6 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         ImGui.text("- Report issues in the Uberith Discord or BWU forums.")
     }
 
-    private fun drawDebug() {
-        ImGui.text("UberChop.log tail")
-        ImGui.sameLine(0f, 8f)
-        debugSelectable = ImGui.checkbox("Selectable", debugSelectable)
-        ImGui.sameLine(0f, 8f)
-        if (ImGui.button("Refresh", 0f, 0f)) {
-            // no-op: content refreshed every frame
-        }
-        val lines = readLogTail(300)
-        if (ImGui.beginChild("DebugScroll", 0f, 0f, true, 0)) {
-            if (debugSelectable) {
-                lines.forEachIndexed { index, line ->
-                    if (ImGui.selectable("$index: $line", false, 0, 0f, 0f)) {
-                        try {
-                            val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
-                            clipboard.setContents(java.awt.datatransfer.StringSelection(line), null)
-                        } catch (_: Throwable) { }
-                    }
-                }
-            } else {
-                lines.forEach { ImGui.text(it) }
-            }
-        }
-        ImGui.endChild()
-    }
 
     private fun drawBreakSettings(settings: com.uberith.api.script.handlers.BreakSettings) {
         ImGui.text("Break Scheduler")
@@ -416,18 +389,6 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         }
     }
 
-    private fun readLogTail(maxLines: Int): List<String> {
-        return try {
-            val home = System.getProperty("user.home")
-            val path = Paths.get(home, ".BotWithUs", "logs", "UberChop.log")
-            if (!Files.exists(path)) return emptyList()
-            val all = Files.readAllLines(path, StandardCharsets.UTF_8)
-            if (all.size <= maxLines) all else all.takeLast(maxLines)
-        } catch (_: Throwable) {
-            emptyList()
-        }
-    }
-
     private fun updateCustomLocation(locationName: String, builder: (CustomLocation?) -> CustomLocation?): Unit {
         script.mutateSettings { current ->
             val mutable = current.customLocations.toMutableMap()
@@ -448,5 +409,8 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         when (this) {
             LogHandlingMode.BANK -> "Bank"
             LogHandlingMode.DROP -> "Drop"
+            LogHandlingMode.BURN -> "Burn"
+            LogHandlingMode.FLETCH -> "Fletch"
         }
 }
+

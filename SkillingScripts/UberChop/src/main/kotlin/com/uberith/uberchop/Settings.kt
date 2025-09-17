@@ -5,7 +5,7 @@ import com.uberith.api.script.handlers.AfkSettings
 import com.uberith.api.script.handlers.BreakSettings
 import com.uberith.api.script.handlers.LogoutSettings
 import com.uberith.api.script.handlers.WorldHopSettings
-import com.uberith.api.game.skills.woodcutting.LogHandlingMode
+import com.uberith.api.game.skills.woodcutting.internal.LogHandlingMode
 
 /** Persisted configuration for UberChop. */
 data class UberChopSettings(
@@ -38,4 +38,5 @@ data class CustomLocation(
 object TreeTypes {
     val ALL: List<String> = Trees.allNamesCamelCase()
 }
+
 

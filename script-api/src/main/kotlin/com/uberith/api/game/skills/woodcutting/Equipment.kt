@@ -10,9 +10,9 @@ import java.util.regex.Pattern
 /**
  * Shared helpers for woodcutting-related equipment interactions.
  */
-object WoodcuttingEquipment {
+object Equipment {
 
-    private val logger = LoggerFactory.getLogger(WoodcuttingEquipment::class.java)
+    private val logger = LoggerFactory.getLogger(Equipment::class.java)
 
     val WOOD_BOX_PATTERN: Pattern = Pattern.compile(".*wood box.*", Pattern.CASE_INSENSITIVE)
     private const val FILL_OPTION = "Fill"
@@ -24,15 +24,15 @@ object WoodcuttingEquipment {
 
     suspend fun ensureWoodBox(script: SuspendableScript, pattern: Pattern = WOOD_BOX_PATTERN, withdraw: Boolean = true): Boolean {
         if (hasWoodBox(pattern)) {
-            logger.info("[WoodcuttingEquipment] Wood box already present in backpack")
+            logger.info("[Equipment] Wood box already present in backpack")
             return false
         }
         if (!withdraw) {
-            logger.info("[WoodcuttingEquipment] Withdraw disabled; skipping wood box retrieval")
+            logger.info("[Equipment] Withdraw disabled; skipping wood box retrieval")
             return false
         }
         val withdrew = Bank.withdraw(pattern, 1)
-        logger.info("[WoodcuttingEquipment] Bank.withdraw(pattern) -> {}", withdrew)
+        logger.info("[Equipment] Bank.withdraw(pattern) -> {}", withdrew)
         if (withdrew) {
             script.awaitTicks(1)
         }
@@ -42,11 +42,11 @@ object WoodcuttingEquipment {
     suspend fun fillWoodBox(script: SuspendableScript, pattern: Pattern = WOOD_BOX_PATTERN, option: String = FILL_OPTION): Boolean {
         val box = findWoodBox(pattern)
         if (box == null) {
-            logger.info("[WoodcuttingEquipment] No wood box found to fill")
+            logger.info("[Equipment] No wood box found to fill")
             return false
         }
         val interacted = Backpack.interact(box, option)
-        logger.info("[WoodcuttingEquipment] Backpack.interact('{}') -> {}", option, interacted)
+        logger.info("[Equipment] Backpack.interact('{}') -> {}", option, interacted)
         if (interacted) {
             script.awaitTicks(1)
         }
@@ -56,15 +56,15 @@ object WoodcuttingEquipment {
     suspend fun emptyWoodBox(script: SuspendableScript, pattern: Pattern = WOOD_BOX_PATTERN, option: String = "Empty - logs and bird's nests"): Boolean {
         val box = findWoodBox(pattern)
         if (box == null) {
-            logger.info("[WoodcuttingEquipment] No wood box found to empty")
+            logger.info("[Equipment] No wood box found to empty")
             return false
         }
         if (!Bank.isOpen()) {
-            logger.info("[WoodcuttingEquipment] Bank must be open to empty the wood box")
+            logger.info("[Equipment] Bank must be open to empty the wood box")
             return false
         }
         val emptied = Bank.emptyBox(script, box.name, option)
-        logger.info("[WoodcuttingEquipment] Bank.emptyBox(option='{}') -> {}", option, emptied)
+        logger.info("[Equipment] Bank.emptyBox(option='{}') -> {}", option, emptied)
         return emptied
     }
 }
