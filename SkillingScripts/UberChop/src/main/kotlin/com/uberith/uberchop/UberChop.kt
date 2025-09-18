@@ -4,12 +4,12 @@ import net.botwithus.kxapi.script.SuspendableScript
 import com.uberith.api.game.skills.woodcutting.TreeLocation
 import com.uberith.api.game.skills.woodcutting.Equipment
 import com.uberith.api.utils.ConfigStore
-import com.uberith.api.game.inventory.Backpack
-import com.uberith.api.game.inventory.Bank
 import com.uberith.api.game.skills.woodcutting.Trees
 import com.uberith.api.game.world.Coordinates
 import com.uberith.api.game.world.Traverse
 import com.uberith.uberchop.gui.UberChopGUI
+import net.botwithus.kxapi.game.inventory.Backpack
+import net.botwithus.kxapi.game.inventory.Bank
 import net.botwithus.rs3.stats.Stats
 import net.botwithus.rs3.world.Coordinate
 import net.botwithus.scripts.Info

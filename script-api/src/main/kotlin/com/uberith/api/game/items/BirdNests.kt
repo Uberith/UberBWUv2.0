@@ -1,9 +1,6 @@
 package com.uberith.api.game.items
 
-import com.uberith.api.nearest
-import com.uberith.api.game.query.result.ResultSet
 import net.botwithus.rs3.item.GroundItem
-import com.uberith.api.game.query.GroundItemQuery
 import java.util.regex.Pattern
 
 /**
