@@ -1,5 +1,6 @@
 pluginManagement {
     repositories {
+        mavenLocal()
         gradlePluginPortal()
         google()
         mavenCentral()
@@ -33,3 +34,5 @@ include(":script-api")
 include(":SkillingScripts")
 // Individual scripts
 include(":SkillingScripts:UberChop")
+
+
