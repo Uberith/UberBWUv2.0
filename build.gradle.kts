@@ -53,9 +53,11 @@ allprojects {
             implementation("net.botwithus.api:api:1.0.+")
             implementation("net.botwithus.imgui:imgui:1.0.+")
             implementation("net.botwithus.xapi:xapi:2.0.+")
+            implementation("net.botwithus.kxapi:kxapi:0.1-SNAPSHOT")
             implementation("botwithus.navigation:nav-api:1.+")
             implementation("com.google.code.gson:gson:2.10.1")
             add("includeInJar", "net.botwithus.xapi:xapi:2.0.+")
+            add("includeInJar", "net.botwithus.kxapi:kxapi:0.1-SNAPSHOT")
 
             if (hasKotlin) {
                 // Compile against kotlin-stdlib 2.2.0 (platform provides this at runtime)
