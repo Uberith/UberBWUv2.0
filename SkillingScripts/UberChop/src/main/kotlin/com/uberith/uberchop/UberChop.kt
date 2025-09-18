@@ -1,6 +1,6 @@
 package com.uberith.uberchop
 
-import com.uberith.api.script.SuspendableScript
+import net.botwithus.kxapi.script.SuspendableScript
 import com.uberith.api.game.skills.woodcutting.TreeLocation
 import com.uberith.api.game.skills.woodcutting.Equipment
 import com.uberith.api.utils.ConfigStore

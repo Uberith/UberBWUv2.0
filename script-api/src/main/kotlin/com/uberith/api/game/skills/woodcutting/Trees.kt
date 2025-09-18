@@ -13,7 +13,7 @@ import java.util.regex.Pattern
  * What this provides
  * - High‑level helpers: [nearest], [chop], [count] keep call‑sites small and readable.
  * - Centralized metadata: naming patterns, level requirements, and membership constraints live in [TreeType].
- * - Coroutine support: a suspendable [chop] overload integrates neatly with [SuspendableScript].
+ * - Coroutine support: a suspendable [chop] overload integrates neatly with [net.botwithus.kxapi.script.SuspendableScript].
  *
  * Architectural notes
  * - Query layer: Uses SceneObjectQuery to locate scene objects by
