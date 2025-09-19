@@ -1,5 +1,7 @@
-package com.uberith.api.game.skills.woodcutting
+package com.uberith.uberchop
 
+import com.uberith.api.game.skills.woodcutting.TreeType
+import com.uberith.api.game.skills.woodcutting.Trees
 import net.botwithus.rs3.world.Coordinate
 
 /**

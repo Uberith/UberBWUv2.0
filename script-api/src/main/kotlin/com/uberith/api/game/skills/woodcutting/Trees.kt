@@ -1,43 +1,90 @@
 package com.uberith.api.game.skills.woodcutting
 
-import net.botwithus.kxapi.game.query.SceneObjectQuery
-import net.botwithus.kxapi.game.query.result.nearest
 import net.botwithus.kxapi.script.SuspendableScript
 import net.botwithus.rs3.entities.SceneObject
+import net.botwithus.xapi.query.SceneObjectQuery
 import java.util.regex.Pattern
 
+object Trees {
 
-class TreeChopRequest internal constructor(
-    private val locator: () -> SceneObject?,
-    private val interactor: (SceneObject) -> Boolean
-) {
     /**
-     * Attempts to locate the nearest matching tree and interact with it.
-     *
-     * @return true if an interaction was issued, false if nothing matched
+     * Stateless woodcutting interaction request used by the fluent [TreeChopRequestBuilder].
      */
-    fun nearest(): Boolean {
-        val target = locator() ?: return false
-        return interactor(target)
+    class TreeChopRequest internal constructor(
+        private val locator: () -> SceneObject?,
+        private val interactor: (SceneObject) -> Boolean
+    ) {
+        /** Attempts to locate the nearest matching tree and interact with it. */
+        fun nearest(): Boolean = locator()?.let(interactor) ?: false
+
+        /** Returns the nearest matching tree without interacting. */
+        fun nearestObject(): SceneObject? = locator()
+
+        /** Interacts with the provided [target] if it is non-null. */
+        fun target(target: SceneObject?): Boolean = target?.let(interactor) ?: false
     }
 
     /**
-     * Returns the nearest matching tree without interacting.
+     * Fluent builder used by [Trees.chop] to configure tree selection before issuing interactions.
+     * Example: `Trees.chop().name("Maple").nearest()`
      */
-    fun nearestObject(): SceneObject? = locator()
+    class TreeChopRequestBuilder internal constructor() {
 
-    /**
-     * Interacts with the provided [target] if it is non-null.
-     */
-    fun target(target: SceneObject?): Boolean = target?.let(interactor) ?: false
-}
-object Trees {
+        private sealed interface Lookup {
+            data object Any : Lookup
+            data class Type(val type: TreeType) : Lookup
+            data class Exact(val pattern: Pattern) : Lookup
+        }
+
+        private var lookup: Lookup = Lookup.Any
+
+        fun any(): TreeChopRequestBuilder = apply { lookup = Lookup.Any }
+
+        fun type(type: TreeType): TreeChopRequestBuilder = apply { lookup = Lookup.Type(type) }
+
+        fun name(name: String): TreeChopRequestBuilder = apply {
+            val trimmed = name.trim()
+            lookup = resolveTreeType(trimmed)?.let(Lookup::Type)
+                ?: Lookup.Exact(exactNamePattern(trimmed))
+        }
+
+        fun pattern(pattern: Pattern): TreeChopRequestBuilder = apply {
+            lookup = Lookup.Exact(pattern)
+        }
+
+        fun nearest(): Boolean = locate()?.let(this@Trees::chop) ?: false
+
+        fun nearestObject(): SceneObject? = locate()
+
+        fun target(target: SceneObject?): Boolean = target?.let(this@Trees::chop) ?: false
+
+        fun build(): TreeChopRequest = TreeChopRequest(
+            locator = ::locate,
+            interactor = this@Trees::chop
+        )
+
+        private fun locate(): SceneObject? = when (val spec = lookup) {
+            Lookup.Any -> this@Trees.nearest()
+            is Lookup.Type -> this@Trees.nearest(spec.type)
+            is Lookup.Exact -> this@Trees.nearest(spec.pattern)
+        }
+
+        private fun exactNamePattern(name: String): Pattern =
+            Pattern.compile("^" + Pattern.quote(name) + "$", Pattern.CASE_INSENSITIVE)
+    }
 
     private val logger: org.slf4j.Logger = org.slf4j.LoggerFactory.getLogger(Trees::class.java)
 
+    /**
+     * Starts a fluent woodcutting request builder.
+     */
+    fun chop(): TreeChopRequestBuilder = TreeChopRequestBuilder()
+
+    private val treeTypes = TreeType.values()
+
     fun resolveTreeType(name: String): TreeType? {
         val norm = toTitleCase(name.trim())
-        return TreeType.values().firstOrNull { t ->
+        return treeTypes.firstOrNull { t ->
             val disp = t.displayName
             val short = disp.removeSuffix(" tree").removeSuffix(" Tree")
             norm.equals(disp, ignoreCase = true) || norm.equals(short, ignoreCase = true)
@@ -46,10 +93,12 @@ object Trees {
 
     // Common preferred interaction actions for trees (include Ivy's "Chop")
     private val preferredActions = listOf("Chop down", "Cut down", "Chop")
+    private val preferredActionsArray = preferredActions.toTypedArray()
 
     private fun chooseAction(options: List<String?>): String =
-        options.firstOrNull { it != null && preferredActions.any { p -> p.equals(it, ignoreCase = true) } }
-            ?: preferredActions.first()
+        preferredActions.firstOrNull { pref ->
+            options.any { option -> option?.equals(pref, ignoreCase = true) == true }
+        } ?: preferredActions.first()
 
     private fun interact(obj: SceneObject): Boolean {
         val options = obj.options ?: emptyList()
@@ -61,6 +110,8 @@ object Trees {
         return ok
     }
 
+    private fun treeQuery() = SceneObjectQuery.newQuery().hidden(false)
+
     /**
      * Finds the nearest visible scene object matching [type].
      *
@@ -69,11 +120,9 @@ object Trees {
      */
     fun nearest(type: TreeType): SceneObject? {
         logger.info("[Trees] nearest(type='{}'): begin", type.displayName)
-        val obj: SceneObject = SceneObjectQuery
-            .newQuery()
+        val obj: SceneObject = treeQuery()
             .name(type.namePattern)
-            .option("Chop down", "Cut down")
-            .hidden(false)
+            .option(*preferredActionsArray)
             .results()
             .nearest() ?: run {
                 logger.info("[Trees] nearest(type='{}'): none found", type.displayName)
@@ -88,21 +137,32 @@ object Trees {
         return obj
     }
 
-    /**
-     * Attempts to interact with the nearest matching tree using a preferred action.
-     *
-     * Action resolution
-     * - Preferred actions (in order): "Chop down" → "Cut down".
-     * - If neither action is present in the object options, we still attempt the first preferred
-     *   action name (as some platforms allow sending an action not enumerated in options).
-     *
-     * Returns
-     * - `true` if an interaction was sent (method returned a positive code), otherwise `false`.
-     *
-     * Caveats
-     * - This method does not wait for an animation or success state; use the suspendable overload
-     *   or handle waiting externally.
-     */
+    fun nearest(): SceneObject? {
+        logger.info("[Trees] nearest(): begin (any tree)")
+        val obj = treeQuery()
+            .option(*preferredActionsArray)
+            .results()
+            .nearest() ?: run {
+                logger.info("[Trees] nearest(): none found")
+                return null
+            }
+        logger.info("[Trees] nearest(): name='{}', typeId={}, options={}", obj.name, obj.typeId, obj.options)
+        return obj
+    }
+
+    fun nearest(pattern: Pattern): SceneObject? {
+        logger.info("[Trees] nearest(pattern='{}'): begin", pattern.pattern())
+        val obj = treeQuery()
+            .name(pattern)
+            .results()
+            .firstOrNull() ?: run {
+                logger.info("[Trees] nearest(pattern='{}'): none found", pattern.pattern())
+                return null
+            }
+        logger.info("[Trees] nearest(pattern='{}'): name='{}', typeId={}, options={}", pattern.pattern(), obj.name, obj.typeId, obj.options)
+        return obj
+    }
+
     /**
      * Builds a [TreeChopRequest] configured for the supplied [type].
      *
@@ -113,20 +173,8 @@ object Trees {
      * @return request builder for chaining (e.g., .nearest())
      */
     fun chop(type: TreeType): TreeChopRequest {
-        val descriptor = "type='${'$'}{type.displayName}'"
-        return TreeChopRequest(
-            locator = {
-                logger.info("[Trees] chop({}): begin", descriptor)
-                val obj = nearest(type)
-                if (obj == null) {
-                    logger.info("[Trees] chop({}): no target", descriptor)
-                } else {
-                    logger.info("[Trees] chop({}): target name='{}', typeId={}", descriptor, obj.name, obj.typeId)
-                }
-                obj
-            },
-            interactor = { target -> interact(target) }
-        )
+        logger.info("[Trees] chop(type='{}'): builder request created", type.displayName)
+        return chop().type(type).build()
     }
 
     /**
@@ -149,23 +197,8 @@ object Trees {
      */
     fun chop(name: String): TreeChopRequest {
         val trimmed = name.trim()
-        val type = resolveTreeType(trimmed)
-        if (type != null) return chop(type)
-
-        return TreeChopRequest(
-            locator = {
-                val pattern = Pattern.compile("^" + Pattern.quote(trimmed) + "$", Pattern.CASE_INSENSITIVE)
-                logger.info("Chop by exact name: '{}'", trimmed)
-                SceneObjectQuery
-                    .newQuery()
-                    .name(pattern)
-                    .hidden(false)
-                    .results()
-                    .firstOrNull()
-                    ?.also { logger.info("Exact name found: name='{}', typeId={}", it.name, it.typeId) }
-            },
-            interactor = { target -> interact(target) }
-        )
+        logger.info("[Trees] chop(name='{}'): builder request created", trimmed)
+        return chop().name(trimmed).build()
     }
 
     /**
@@ -181,6 +214,11 @@ object Trees {
         return size
     }
 
+    private suspend fun SuspendableScript.awaitPostChop(success: Boolean): Boolean {
+        if (success) awaitTicks(2)
+        return success
+    }
+
     /**
      * Suspends then chops the nearest tree matching [type].
      *
@@ -189,9 +227,7 @@ object Trees {
      * @return true if the interaction was issued
      */
     suspend fun chop(script: SuspendableScript, type: TreeType): Boolean {
-        val ok = chop(type).nearest()
-        if (ok) script.awaitTicks(2)
-        return ok
+        return script.awaitPostChop(chop(type).nearest())
     }
 
     /**
@@ -202,9 +238,7 @@ object Trees {
      * @return true if the interaction was issued
      */
     suspend fun chop(script: SuspendableScript, target: SceneObject): Boolean {
-        val ok = chop(target)
-        if (ok) script.awaitTicks(2)
-        return ok
+        return script.awaitPostChop(chop(target))
     }
 
     /**
@@ -215,9 +249,7 @@ object Trees {
      * @return true if the interaction was issued
      */
     suspend fun chop(script: SuspendableScript, name: String): Boolean {
-        val ok = chop(name).nearest()
-        if (ok) script.awaitTicks(2)
-        return ok
+        return script.awaitPostChop(chop(name).nearest())
     }
 
     /**
@@ -237,7 +269,7 @@ object Trees {
      * @return list of available tree types
      */
     fun availableFor(level: Int, isMember: Boolean): List<TreeType> =
-        TreeType.values().filter { level >= it.levelReq && (!it.membersOnly || isMember) }
+        treeTypes.filter { level >= it.levelReq && (!it.membersOnly || isMember) }
 
     /**
      * Picks the highest‑requirement available [TreeType] for the given context.
@@ -270,11 +302,9 @@ object Trees {
             hay.toString().contains(needle, ignoreCase = true)
         }
         logger.info("[Trees] nearest(name): fallback contains(name) + has chop option")
-        val obj = SceneObjectQuery
-            .newQuery()
+        val obj = treeQuery()
             .name(contains, name.trim())
             .option(contains, "chop")
-            .hidden(false)
             .results()
             .firstOrNull() ?: run {
                 logger.info("[Trees] nearest(name): no fallback match for '{}'", name)
@@ -288,7 +318,7 @@ object Trees {
      * Returns all supported [TreeType] values in their declared enum order.
      * Useful for building full selection lists in UIs.
      */
-    fun allTypes(): List<TreeType> = TreeType.values().toList()
+    fun allTypes(): List<TreeType> = treeTypes.toList()
 
     /**
      * Returns a list of all tree display names formatted in Title Case
@@ -299,29 +329,13 @@ object Trees {
      * - "Eternal magic tree" -> "Eternal Magic Tree"
      */
     fun allNamesCamelCase(): List<String> =
-        allTypes().map { toTitleCase(it.displayName) }
+        treeTypes.map { toTitleCase(it.displayName) }
 
     /**
      * Returns pairs of ([TreeType], Title-Case name) for convenient binding in UIs.
      */
     fun allWithCamelCaseNames(): List<Pair<TreeType, String>> =
-        allTypes().map { it to toTitleCase(it.displayName) }
-
-    val locations: List<TreeLocation>
-        get() = TreeLocations.ALL
-
-    fun locationsFor(type: TreeType): List<TreeLocation> = TreeLocations.locationsFor(type)
-
-    fun locationsFor(name: String): List<TreeLocation> = TreeLocations.locationsFor(name)
-
-    fun resolveLocation(treeName: String, savedLocation: String?): TreeLocation? {
-        val candidates = locationsFor(treeName)
-        if (candidates.isEmpty()) return null
-        if (!savedLocation.isNullOrBlank()) {
-            candidates.firstOrNull { it.name.equals(savedLocation, ignoreCase = true) }?.let { return it }
-        }
-        return candidates.firstOrNull()
-    }
+        treeTypes.map { it to toTitleCase(it.displayName) }
 
     private fun toTitleCase(text: String): String =
         text.trim()

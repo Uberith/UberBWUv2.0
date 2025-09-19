@@ -1,19 +1,21 @@
 package com.uberith.uberchop
 
 import net.botwithus.kxapi.script.SuspendableScript
-import com.uberith.api.game.skills.woodcutting.TreeLocation
-import com.uberith.api.game.skills.woodcutting.Equipment
+import com.google.gson.JsonObject
 import com.uberith.api.utils.ConfigStore
 import com.uberith.api.game.skills.woodcutting.Trees
 import com.uberith.api.game.world.Coordinates
-import com.uberith.api.game.traversal.Traverse
 import com.uberith.uberchop.gui.UberChopGUI
-import net.botwithus.kxapi.game.inventory.Backpack
-import net.botwithus.kxapi.game.inventory.Bank
+import net.botwithus.kxapi.game.inventory.BackpackExtensions
 import net.botwithus.rs3.stats.Stats
 import net.botwithus.rs3.world.Coordinate
 import net.botwithus.scripts.Info
 import net.botwithus.ui.workspace.Workspace
+import net.botwithus.xapi.game.inventory.Backpack
+import net.botwithus.xapi.game.inventory.Bank
+import net.botwithus.xapi.game.traversal.Traverse
+import net.botwithus.xapi.script.ui.interfaces.BuildableUI
+import kotlin.jvm.JvmName
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import java.util.regex.Pattern
@@ -32,7 +34,7 @@ class UberChop : SuspendableScript() {
     var bankWhenFull: Boolean = false
     var withdrawWoodBox: Boolean = false
     var logsChopped: Int = 0
-    var status: String = "Idle"
+    @get:JvmName("getStatusText") var status: String = "Idle"
     @Volatile var phase: Phase = Phase.READY
     private val logger: Logger = LoggerFactory.getLogger(this.javaClass)
     private var totalRuntimeMs: Long = 0L
@@ -41,7 +43,9 @@ class UberChop : SuspendableScript() {
     private val settingsStore = ConfigStore<Settings>("UberChop", Settings::class.java)
     @Volatile private var uiInitialized: Boolean = false
 
+    override fun getStatus(): String? = status
     private val logsPattern: Pattern = Pattern.compile(".*logs.*", Pattern.CASE_INSENSITIVE)
+    private val woodBoxPattern: Pattern = Pattern.compile(".*wood box.*", Pattern.CASE_INSENSITIVE)
 
     private fun applySettings(s: Settings) {
         settings = s
@@ -150,7 +154,7 @@ class UberChop : SuspendableScript() {
         }
 
         awaitIdle()
-        if (Traverse.ensureWithin(this, prepBank, 10)) return true
+        if (Coordinates.isPlayerWithinRadius(prepBank, 10)) return true
         if (openBankIfNeeded()) return true
         if (withdrawWoodBox && Equipment.ensureWoodBox(this)) return true
 
@@ -160,7 +164,7 @@ class UberChop : SuspendableScript() {
 
     private suspend fun handleBankingPhase(): Boolean {
         awaitIdle()
-        if (Traverse.ensureWithin(this, effectiveBankCoordinate(), 10)) return true
+        if (Coordinates.isPlayerWithinRadius(effectiveBankCoordinate(), 10)) return true
         if (openBankIfNeeded()) return true
         if (withdrawWoodBox && Equipment.ensureWoodBox(this)) return true
 
@@ -181,7 +185,7 @@ class UberChop : SuspendableScript() {
 
     private suspend fun handleChoppingPhase(): Boolean {
         if (Backpack.isFull()) {
-            if (withdrawWoodBox && Equipment.fillWoodBox(this)) {
+            if (withdrawWoodBox && BackpackExtensions.interact("Fill",woodBoxPattern)) {
                 if (Backpack.isFull()) {
                     phase = Phase.BANKING
                     return true
@@ -196,7 +200,7 @@ class UberChop : SuspendableScript() {
 
         awaitIdle()
 
-        if (Traverse.ensureWithin(this, effectiveChopCoordinate(), 40)) return true
+        if (Coordinates.isPlayerWithinRadius(effectiveChopCoordinate(), 40)) return true
 
         if (Trees.chop(this, targetTree)) {
             status = "Chopping $targetTree"
@@ -225,8 +229,13 @@ class UberChop : SuspendableScript() {
         val names = TreeTypes.ALL
         val treeIndex = settings.savedTreeType.coerceIn(0, names.lastIndex)
         targetTree = names[treeIndex]
-        val resolved = Trees.resolveLocation(targetTree, settings.savedLocation)
-        location = resolved?.name ?: Trees.locations.firstOrNull()?.name.orEmpty()
+
+        val available = TreeLocations.locationsFor(targetTree)
+        val resolved = settings.savedLocation.takeIf { it.isNotBlank() }?.let { saved ->
+            available.firstOrNull { it.name.equals(saved, ignoreCase = true) }
+        } ?: available.firstOrNull() ?: TreeLocations.ALL.firstOrNull()
+
+        location = resolved?.name.orEmpty()
         settings.savedLocation = location
     }
 
@@ -247,7 +256,7 @@ class UberChop : SuspendableScript() {
 
     // Location catalog embedded in code
     val treeLocations: List<TreeLocation>
-        get() = Trees.locations
+        get() = TreeLocations.ALL
 
     // GUI instance
     private val gui by lazy { UberChopGUI(this) }
@@ -259,6 +268,20 @@ class UberChop : SuspendableScript() {
 
         // Load persisted settings before reading them
         loadSettings()
+    }
+
+    override fun getBuildableUI(): BuildableUI = gui
+
+    override fun savePersistentData(data: JsonObject?) {
+        persistSettings()
+    }
+
+    override fun loadPersistentData(data: JsonObject?) {
+        loadSettings()
+    }
+
+    override fun onDrawConfig(workspace: Workspace?) {
+        workspace?.let { gui.render(it) }
     }
 
     override fun onDraw(workspace: Workspace) {

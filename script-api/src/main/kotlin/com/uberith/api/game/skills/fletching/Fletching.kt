@@ -1,8 +1,8 @@
 package com.uberith.api.game.skills.fletching
 
-import net.botwithus.kxapi.game.query.ComponentQuery
 import net.botwithus.rs3.interfaces.Component
 import net.botwithus.rs3.item.InventoryItem
+import net.botwithus.xapi.query.ComponentQuery
 import org.slf4j.Logger
 
 /**

@@ -38,7 +38,7 @@ object Coordinates {
     fun samePlane(a: Coordinate, b: Coordinate): Boolean = a.z == b.z
 
     /** 2D Euclidean distance between [a] and [b] (ignores `z`). */
-    fun distance(a: Coordinate, b: Coordinate): Double = hypot((a.x - b.x).toDouble(), (a.y - b.y).toDouble())
+    fun distance(a: Coordinate, b: Coordinate?): Double = hypot((a.x - (b?.x ?: 0)).toDouble(), (a.y - (b?.y ?: 0)).toDouble())
 
     /** 2D Euclidean distance from player to [target], or null if player is unknown. */
     fun distanceToPlayer(target: Coordinate): Double? = player()?.let { distance(it, target) }
@@ -46,13 +46,13 @@ object Coordinates {
     /**
      * True if [point] lies within [radius] (inclusive) of [center], using 2D distance.
      */
-    fun withinRadius(point: Coordinate, center: Coordinate, radius: Int): Boolean =
+    fun withinRadius(point: Coordinate, center: Coordinate?, radius: Int): Boolean =
         distance(point, center) <= radius.toDouble()
 
     /**
      * True if the player is within [radius] (inclusive) of [center]. Returns false if player is unknown.
      */
-    fun isPlayerWithinRadius(center: Coordinate, radius: Int): Boolean =
+    fun isPlayerWithinRadius(center: Coordinate?, radius: Int): Boolean =
         player()?.let { withinRadius(it, center, radius) } ?: false
 
     /**
@@ -124,4 +124,33 @@ object Coordinates {
         rng: Random = Random,
         isReachable: ((Coordinate) -> Boolean)? = null
     ): Coordinate? = player()?.let { randomReachableNear(it, radius, maxAttempts, rng, isReachable) }
+
+    /**
+     * Prepares a movement plan aimed at getting within [radius] of [target].
+     *
+     * - When already inside the radius, marks the plan as [alreadyWithinRadius].
+     * - Otherwise selects a random reachable point within [randomRadius] tiles (if available)
+     *   and returns it as [destination], falling back to [target] when none are found.
+     */
+    data class NearDestination(
+        val destination: Coordinate,
+        val candidate: Coordinate?,
+        val alreadyWithinRadius: Boolean
+    )
+
+    fun planMovementTowards(
+        target: Coordinate,
+        radius: Int,
+        randomRadius: Int = 10,
+        maxAttempts: Int = 32,
+        rng: Random = Random,
+        isReachable: ((Coordinate) -> Boolean)? = null
+    ): NearDestination {
+        if (isPlayerWithinRadius(target, radius)) {
+            return NearDestination(target, null, true)
+        }
+        val candidate = randomReachableNear(target, randomRadius, maxAttempts, rng, isReachable)
+        val destination = candidate ?: target
+        return NearDestination(destination, candidate, false)
+    }
 }

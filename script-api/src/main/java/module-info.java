@@ -6,18 +6,14 @@ module UberScriptAPI.main {
     requires org.slf4j;
     requires xapi;
 
-    exports com.uberith.api;
     exports com.uberith.api.utils;
     exports com.uberith.api.script;
     exports com.uberith.api.script.handlers;
-    exports com.uberith.api.game;
     exports com.uberith.api.game.world;
-    exports com.uberith.api.game.items;
     exports com.uberith.api.game.skills.magic;
     exports com.uberith.api.game.skills.firemaking;
     exports com.uberith.api.game.skills.fletching;
     exports com.uberith.api.game.skills.woodcutting;
-    exports com.uberith.api.game.skills.woodcutting.internal;
     exports com.uberith.api.ui;
     exports com.uberith.api.ui.imgui;
 }
