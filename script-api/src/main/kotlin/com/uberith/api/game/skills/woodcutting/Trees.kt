@@ -7,51 +7,6 @@ import net.botwithus.rs3.entities.SceneObject
 import java.util.regex.Pattern
 
 
-/**
- * Trees API — convenience helpers for querying and interacting with in‑world trees.
- *
- * What this provides
- * - High‑level helpers: [nearest], [chop], [count] keep call‑sites small and readable.
- * - Centralized metadata: naming patterns, level requirements, and membership constraints live in [TreeType].
- * - Coroutine support: a suspendable [chop] overload integrates neatly with [net.botwithus.kxapi.script.SuspendableScript].
- *
- * Architectural notes
- * - Query layer: Uses SceneObjectQuery to locate scene objects by
- *   name and visibility, avoiding direct dependencies at call sites.
- * - Decoupling: We interact with net.botwithus.rs3.entities.SceneObject directly.
- *
- * Behavior and assumptions
- * - Name matching: [TreeType.namePattern] is a case‑insensitive regex crafted for exact tree names
- *   (e.g., "^Yew$"); this avoids accidental matches on similarly named objects.
- * - Action preference: [chop] prefers "Chop down", then falls back to "Cut down" if available.
- * - Exclusions: Some trees share models with unchoppable scenery; those object ids are excluded
- *   via [TreeType.excludedIds] when available.
- * - Distance/visibility: [nearest] and [count] operate on visible scene objects; they do not pathfind
- *   or verify reachability.
- *
- * Performance
- * - Queries are executed per call. For rapid polling, consider caching the last result or throttling
- *   invocations to avoid excessive query pressure.
- *
- * Threading
- * - Methods are stateless and thread‑safe under the assumption that the underlying query engine is
- *   itself thread‑safe for read operations.
- *
- * Usage examples
- * ```kotlin
- * // Find the closest yew and try to chop it
- * val found = Trees.chop(TreeType.YEW).nearest()
- *
- * // Suspendable usage inside a SuspendableScript
- * val ok = Trees.chop(this, TreeType.MAGIC) // yields ~2 ticks on success
- *
- * // Choose best available by level/membership
- * val best = Trees.bestFor(level = 61, isMember = true)
- * best?.let { Trees.chop(it).nearest() }
- * ```
- */
-// Wrapper no longer needed; APIs now use SceneObject directly.
-
 class TreeChopRequest internal constructor(
     private val locator: () -> SceneObject?,
     private val interactor: (SceneObject) -> Boolean

@@ -170,13 +170,13 @@ project(":SkillingScripts:UberChop") {
 
     dependencies {
         implementation(project(":script-api"))
-        add("includeInJar", project(mapOf("path" to ":script-api", "configuration" to "desktopRuntimeElements")))
+        add("includeInJar", project(mapOf("path" to ":script-api", "configuration" to "jvmRuntimeElements")))
     }
 
     tasks.named<JavaCompile>("compileJava").configure {
-        dependsOn("compileKotlin", ":script-api:compileKotlinDesktop", ":script-api:compileDesktopMainJava")
-        val scriptApiKotlinOut = project(":script-api").layout.buildDirectory.dir("classes/kotlin/desktop/main")
-        val scriptApiJavaOut = project(":script-api").layout.buildDirectory.dir("classes/java/desktop/main")
+        dependsOn("compileKotlin", ":script-api:compileKotlinJvm", ":script-api:compileJvmMainJava")
+        val scriptApiKotlinOut = project(":script-api").layout.buildDirectory.dir("classes/kotlin/jvm/main")
+        val scriptApiJavaOut = project(":script-api").layout.buildDirectory.dir("classes/java/jvm/main")
         val localKotlinOut = layout.buildDirectory.dir("classes/kotlin/main")
         val localJavaOut = layout.buildDirectory.dir("classes/java/main")
         val paths = listOf(
@@ -198,7 +198,7 @@ project(":script-api") {
     apply(plugin = "org.jetbrains.kotlin.multiplatform")
     apply(plugin = "org.jetbrains.kotlin.plugin.serialization")
     extensions.configure<KotlinMultiplatformExtension>("kotlin") {
-        jvm("desktop")
+        jvm()
         jvmToolchain(24)
     }
 
@@ -220,7 +220,7 @@ project(":script-api") {
             }
         }
 
-        kotlinExt.sourceSets.named("desktopMain") {
+        kotlinExt.sourceSets.named("jvmMain") {
             kotlin.srcDir("src/main/kotlin")
             resources.srcDir("src/main/resources")
             dependencies {
@@ -234,9 +234,10 @@ project(":script-api") {
             }
         }
 
-        tasks.named<JavaCompile>("compileDesktopMainJava").configure {
-            dependsOn(tasks.named("compileKotlinDesktop"))
-            val kotlinOut = layout.buildDirectory.dir("classes/kotlin/desktop/main")
+        tasks.named<JavaCompile>("compileJvmMainJava").configure {
+            source("src/main/java")
+            dependsOn(tasks.named("compileKotlinJvm"))
+            val kotlinOut = layout.buildDirectory.dir("classes/kotlin/jvm/main")
             options.compilerArgs.addAll(listOf("--patch-module", "UberScriptAPI.main=${kotlinOut.get().asFile.path}"))
         }
     }
