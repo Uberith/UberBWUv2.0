@@ -1,8 +1,8 @@
 package com.uberith.api.game.skills.woodcutting
 
-import com.uberith.api.script.SuspendableScript
-import com.uberith.api.nearest
-import com.uberith.api.game.query.SceneObjectQuery
+import net.botwithus.kxapi.game.query.SceneObjectQuery
+import net.botwithus.kxapi.game.query.result.nearest
+import net.botwithus.kxapi.script.SuspendableScript
 import net.botwithus.rs3.entities.SceneObject
 import java.util.regex.Pattern
 

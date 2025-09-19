@@ -1,8 +1,14 @@
+import java.io.File
+import org.gradle.api.tasks.compile.JavaCompile
+import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
     kotlin("jvm")
+    kotlin("multiplatform") apply false
+    kotlin("plugin.serialization") apply false
 }
 
 group = "uberith"
@@ -148,6 +154,90 @@ allprojects {
         // Also catch tasks created later
         tasks.whenTaskAdded {
             if (name == "jar" || name == "copyJar") enabled = false
+        }
+    }
+}
+
+project(":SkillingScripts") {
+    tasks.matching { it.name == "copyJar" }.configureEach { enabled = false }
+    tasks.withType<Jar>().configureEach { enabled = false }
+    tasks.withType<Test>().configureEach { enabled = false }
+}
+
+project(":SkillingScripts:UberChop") {
+    group = "com.uberith.skillingscripts.uberchop"
+    version = "1.0.0-SNAPSHOT"
+
+    dependencies {
+        implementation(project(":script-api"))
+        add("includeInJar", project(mapOf("path" to ":script-api", "configuration" to "desktopRuntimeElements")))
+    }
+
+    tasks.named<JavaCompile>("compileJava").configure {
+        dependsOn("compileKotlin", ":script-api:compileKotlinDesktop", ":script-api:compileDesktopMainJava")
+        val scriptApiKotlinOut = project(":script-api").layout.buildDirectory.dir("classes/kotlin/desktop/main")
+        val scriptApiJavaOut = project(":script-api").layout.buildDirectory.dir("classes/java/desktop/main")
+        val localKotlinOut = layout.buildDirectory.dir("classes/kotlin/main")
+        val localJavaOut = layout.buildDirectory.dir("classes/java/main")
+        val paths = listOf(
+            localKotlinOut.get().asFile.path,
+            localJavaOut.get().asFile.path,
+            scriptApiKotlinOut.get().asFile.path,
+            scriptApiJavaOut.get().asFile.path,
+        )
+        val patchPath = paths.joinToString(File.pathSeparator)
+        options.compilerArgs.addAll(listOf("--patch-module", "UberChop=${patchPath}"))
+    }
+
+    tasks.named<KotlinCompile>("compileKotlin").configure {
+        destinationDirectory.set(layout.buildDirectory.dir("classes/kotlin/main"))
+    }
+}
+
+project(":script-api") {
+    apply(plugin = "org.jetbrains.kotlin.multiplatform")
+    apply(plugin = "org.jetbrains.kotlin.plugin.serialization")
+    extensions.configure<KotlinMultiplatformExtension>("kotlin") {
+        jvm("desktop")
+        jvmToolchain(24)
+    }
+
+    afterEvaluate {
+        val kotlinExt = extensions.getByType<KotlinMultiplatformExtension>()
+        kotlinExt.sourceSets.named("commonMain") {
+            dependencies {
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+                implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+                implementation("net.botwithus.kxapi:kxapi:0.1-SNAPSHOT")
+            }
+        }
+
+        kotlinExt.sourceSets.named("commonTest") {
+            dependencies {
+                implementation(kotlin("test"))
+                implementation("app.cash.turbine:turbine:1.1.0")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+            }
+        }
+
+        kotlinExt.sourceSets.named("desktopMain") {
+            kotlin.srcDir("src/main/kotlin")
+            resources.srcDir("src/main/resources")
+            dependencies {
+                implementation("org.slf4j:slf4j-api:2.0.9")
+                implementation("net.botwithus.api:api:1.0.+")
+                implementation("net.botwithus.imgui:imgui:1.0.+")
+                implementation("net.botwithus.xapi:xapi:2.0.+")
+                implementation("net.botwithus.kxapi:kxapi:0.1-SNAPSHOT")
+                implementation("botwithus.navigation:nav-api:1.+")
+                implementation("com.google.code.gson:gson:2.10.1")
+            }
+        }
+
+        tasks.named<JavaCompile>("compileDesktopMainJava").configure {
+            dependsOn(tasks.named("compileKotlinDesktop"))
+            val kotlinOut = layout.buildDirectory.dir("classes/kotlin/desktop/main")
+            options.compilerArgs.addAll(listOf("--patch-module", "UberScriptAPI.main=${kotlinOut.get().asFile.path}"))
         }
     }
 }

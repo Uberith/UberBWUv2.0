@@ -1,13 +1,13 @@
 package com.uberith.api.game.skills.woodcutting
 
-import com.uberith.api.script.SuspendableScript
-import com.uberith.api.game.inventory.Backpack
-import com.uberith.api.game.inventory.Bank
 import com.uberith.api.game.items.BirdNests
 import com.uberith.api.game.skills.firemaking.Firemaking
 import com.uberith.api.game.skills.fletching.Fletching
 import com.uberith.api.game.skills.woodcutting.internal.LogHandlingMode
 import com.uberith.api.game.world.Traverse
+import net.botwithus.kxapi.game.inventory.Backpack
+import net.botwithus.kxapi.game.inventory.Bank
+import net.botwithus.kxapi.script.SuspendableScript
 import net.botwithus.rs3.item.InventoryItem
 import net.botwithus.rs3.world.Coordinate
 import org.slf4j.Logger

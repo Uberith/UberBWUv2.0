@@ -1,7 +1,8 @@
 package com.uberith.api.game.traversal
 
-import com.uberith.api.game.query.ComponentQuery
-import com.uberith.api.game.query.NpcQuery
+import net.botwithus.kxapi.game.query.ComponentQuery
+import net.botwithus.kxapi.game.query.NpcQuery
+
 
 /**
  * Helpers for opening and interacting with the Magic Carpet travel interface.

@@ -1,6 +1,6 @@
 package com.uberith.api.script.handlers
 
-import com.uberith.api.script.SuspendableScript
+import net.botwithus.kxapi.script.SuspendableScript
 import org.slf4j.LoggerFactory
 import kotlin.math.max
 import kotlin.random.Random

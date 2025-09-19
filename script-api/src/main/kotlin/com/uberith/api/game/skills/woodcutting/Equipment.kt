@@ -1,8 +1,8 @@
 package com.uberith.api.game.skills.woodcutting
 
-import com.uberith.api.script.SuspendableScript
-import com.uberith.api.game.inventory.Backpack
-import com.uberith.api.game.inventory.Bank
+import net.botwithus.kxapi.game.inventory.Backpack
+import net.botwithus.kxapi.game.inventory.Bank
+import net.botwithus.kxapi.script.SuspendableScript
 import net.botwithus.rs3.item.InventoryItem
 import org.slf4j.LoggerFactory
 import java.util.regex.Pattern

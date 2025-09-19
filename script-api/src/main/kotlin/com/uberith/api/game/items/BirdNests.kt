@@ -2,6 +2,9 @@ package com.uberith.api.game.items
 
 import net.botwithus.rs3.item.GroundItem
 import java.util.regex.Pattern
+import net.botwithus.kxapi.game.query.GroundItemQuery
+import net.botwithus.kxapi.game.query.result.ResultSet
+import net.botwithus.kxapi.game.query.result.nearest
 
 /**
  * Helpers for locating bird's nest ground items.

@@ -1,6 +1,7 @@
 package com.uberith.api.game.traversal
 
-import com.uberith.api.game.query.ComponentQuery
+import net.botwithus.kxapi.game.query.ComponentQuery
+
 
 /**
  * Helpers for interacting with the Lodestone Network UI.

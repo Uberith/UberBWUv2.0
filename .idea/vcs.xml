@@ -2,6 +2,7 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/../BWU-V2-XAPI-KT" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/external/BotWithUs-V2-API" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/external/BotWithUs-V2-XAPI" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/external/UberBWUv2" vcs="Git" />

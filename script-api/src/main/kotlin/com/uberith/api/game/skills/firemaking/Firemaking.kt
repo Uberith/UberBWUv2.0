@@ -1,6 +1,5 @@
 package com.uberith.api.game.skills.firemaking
 
-import com.uberith.api.game.inventory.Backpack
 import net.botwithus.rs3.item.InventoryItem
 import org.slf4j.Logger
 
