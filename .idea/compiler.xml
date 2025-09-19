@@ -11,8 +11,9 @@
   </component>
   <component name="JavacSettings">
     <option name="ADDITIONAL_OPTIONS_OVERRIDE">
-      <module name="UberBWU2.0.SkillingScripts.UberChop.main" options="--patch-module &quot;UberChop=C:\Users\Lewis Matlock\IdeaProjects\UberBWUv2.0\SkillingScripts\UberChop\build\classes\kotlin\main;C:\Users\Lewis Matlock\IdeaProjects\UberBWUv2.0\SkillingScripts\UberChop\build\classes\java\main;C:\Users\Lewis Matlock\IdeaProjects\UberBWUv2.0\script-api\build\classes\kotlin\desktop\main;C:\Users\Lewis Matlock\IdeaProjects\UberBWUv2.0\script-api\build\classes\java\desktop\main&quot;" />
+      <module name="UberBWU2.0.SkillingScripts.UberChop.main" options="--patch-module &quot;UberChop=C:\Users\Lewis Matlock\IdeaProjects\UberBWUv2.0\SkillingScripts\UberChop\build\classes\kotlin\main;C:\Users\Lewis Matlock\IdeaProjects\UberBWUv2.0\SkillingScripts\UberChop\build\classes\java\main;C:\Users\Lewis Matlock\IdeaProjects\UberBWUv2.0\script-api\build\classes\kotlin\jvm\main;C:\Users\Lewis Matlock\IdeaProjects\UberBWUv2.0\script-api\build\classes\java\jvm\main&quot;" />
       <module name="UberBWU2.0.script-api.desktopMain" options="--patch-module &quot;UberScriptAPI.main=C:\Users\Lewis Matlock\IdeaProjects\UberBWUv2.0\script-api\build\classes\kotlin\desktop\main&quot;" />
+      <module name="UberBWU2.0.script-api.jvmMain" options="--patch-module &quot;UberScriptAPI.main=C:\Users\Lewis Matlock\IdeaProjects\UberBWUv2.0\script-api\build\classes\kotlin\jvm\main&quot;" />
     </option>
   </component>
 </project>

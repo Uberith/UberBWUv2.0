@@ -1,8 +1,11 @@
-import java.io.File
+import org.gradle.api.GradleException
+import org.gradle.api.plugins.JavaPluginExtension
+import org.gradle.api.tasks.Copy
+import org.gradle.api.file.DuplicatesStrategy
+import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.compile.JavaCompile
-import org.gradle.api.tasks.testing.Test
+import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
@@ -27,8 +30,6 @@ allprojects {
             apply(plugin = "java")
         }
     }
-
-    // Repositories are managed centrally in settings.gradle.kts
 
     if (hasSources) {
         configurations {
@@ -95,16 +96,13 @@ allprojects {
             }
         }
 
-        // Ensure module-info.java (Java) sees Kotlin classes like com.uberith.uberchop.UberChop
         tasks.named<JavaCompile>("compileJava") {
             dependsOn(tasks.named("compileKotlin"))
         }
     }
 
-    // Avoid bringing both kotlinx-coroutines-core and -core-jvm onto the module path
     configurations.configureEach {
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
-        // Pin only stdlib artifacts to 2.2.0; leave Build Tools artifacts to the KGP version
         resolutionStrategy.eachDependency {
             if (requested.group == "org.jetbrains.kotlin") {
                 if (requested.name == "kotlin-stdlib" ||
@@ -126,10 +124,8 @@ allprojects {
         tasks.withType<Jar>().configureEach {
             duplicatesStrategy = DuplicatesStrategy.EXCLUDE
             from(configurations["includeInJar"].map { zipTree(it) }) {
-                // Exclude module descriptors and signature files from shaded jars only
                 exclude("module-info.class")
                 exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
-                // Never embed kotlin runtime in scripts
                 exclude("kotlin/**", "META-INF/*.kotlin_module", "META-INF/kotlin*")
             }
         }
@@ -147,98 +143,12 @@ allprojects {
         }
     }
 
-    // Always prevent creating/copying a root jar (root name contains a dot) regardless of sources
     if (project == rootProject) {
         tasks.withType<Jar>().configureEach { enabled = false }
         tasks.matching { it.name == "copyJar" }.configureEach { enabled = false }
-        // Also catch tasks created later
         tasks.whenTaskAdded {
             if (name == "jar" || name == "copyJar") enabled = false
         }
     }
 }
 
-project(":SkillingScripts") {
-    tasks.matching { it.name == "copyJar" }.configureEach { enabled = false }
-    tasks.withType<Jar>().configureEach { enabled = false }
-    tasks.withType<Test>().configureEach { enabled = false }
-}
-
-project(":SkillingScripts:UberChop") {
-    group = "com.uberith.skillingscripts.uberchop"
-    version = "1.0.0-SNAPSHOT"
-
-    dependencies {
-        implementation(project(":script-api"))
-        add("includeInJar", project(mapOf("path" to ":script-api", "configuration" to "jvmRuntimeElements")))
-    }
-
-    tasks.named<JavaCompile>("compileJava").configure {
-        dependsOn("compileKotlin", ":script-api:compileKotlinJvm", ":script-api:compileJvmMainJava")
-        val scriptApiKotlinOut = project(":script-api").layout.buildDirectory.dir("classes/kotlin/jvm/main")
-        val scriptApiJavaOut = project(":script-api").layout.buildDirectory.dir("classes/java/jvm/main")
-        val localKotlinOut = layout.buildDirectory.dir("classes/kotlin/main")
-        val localJavaOut = layout.buildDirectory.dir("classes/java/main")
-        val paths = listOf(
-            localKotlinOut.get().asFile.path,
-            localJavaOut.get().asFile.path,
-            scriptApiKotlinOut.get().asFile.path,
-            scriptApiJavaOut.get().asFile.path,
-        )
-        val patchPath = paths.joinToString(File.pathSeparator)
-        options.compilerArgs.addAll(listOf("--patch-module", "UberChop=${patchPath}"))
-    }
-
-    tasks.named<KotlinCompile>("compileKotlin").configure {
-        destinationDirectory.set(layout.buildDirectory.dir("classes/kotlin/main"))
-    }
-}
-
-project(":script-api") {
-    apply(plugin = "org.jetbrains.kotlin.multiplatform")
-    apply(plugin = "org.jetbrains.kotlin.plugin.serialization")
-    extensions.configure<KotlinMultiplatformExtension>("kotlin") {
-        jvm()
-        jvmToolchain(24)
-    }
-
-    afterEvaluate {
-        val kotlinExt = extensions.getByType<KotlinMultiplatformExtension>()
-        kotlinExt.sourceSets.named("commonMain") {
-            dependencies {
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
-                implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
-                implementation("net.botwithus.kxapi:kxapi:0.1-SNAPSHOT")
-            }
-        }
-
-        kotlinExt.sourceSets.named("commonTest") {
-            dependencies {
-                implementation(kotlin("test"))
-                implementation("app.cash.turbine:turbine:1.1.0")
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
-            }
-        }
-
-        kotlinExt.sourceSets.named("jvmMain") {
-            kotlin.srcDir("src/main/kotlin")
-            resources.srcDir("src/main/resources")
-            dependencies {
-                implementation("org.slf4j:slf4j-api:2.0.9")
-                implementation("net.botwithus.api:api:1.0.+")
-                implementation("net.botwithus.imgui:imgui:1.0.+")
-                implementation("net.botwithus.xapi:xapi:2.0.+")
-                implementation("net.botwithus.kxapi:kxapi:0.1-SNAPSHOT")
-                implementation("botwithus.navigation:nav-api:1.+")
-                implementation("com.google.code.gson:gson:2.10.1")
-            }
-        }
-
-        tasks.named<JavaCompile>("compileJvmMainJava").configure {
-            source("src/main/java")
-            dependsOn(tasks.named("compileKotlinJvm"))
-            val kotlinOut = layout.buildDirectory.dir("classes/kotlin/jvm/main")
-            options.compilerArgs.addAll(listOf("--patch-module", "UberScriptAPI.main=${kotlinOut.get().asFile.path}"))
-        }
-    }
-}
