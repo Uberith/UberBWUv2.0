@@ -6,7 +6,7 @@ import com.uberith.api.game.skills.woodcutting.Equipment
 import com.uberith.api.utils.ConfigStore
 import com.uberith.api.game.skills.woodcutting.Trees
 import com.uberith.api.game.world.Coordinates
-import com.uberith.api.game.world.Traverse
+import com.uberith.api.game.traversal.Traverse
 import com.uberith.uberchop.gui.UberChopGUI
 import net.botwithus.kxapi.game.inventory.Backpack
 import net.botwithus.kxapi.game.inventory.Bank

@@ -4,7 +4,7 @@ import com.uberith.api.game.items.BirdNests
 import com.uberith.api.game.skills.firemaking.Firemaking
 import com.uberith.api.game.skills.fletching.Fletching
 import com.uberith.api.game.skills.woodcutting.internal.LogHandlingMode
-import com.uberith.api.game.world.Traverse
+import com.uberith.api.game.traversal.Traverse
 import net.botwithus.kxapi.game.inventory.Backpack
 import net.botwithus.kxapi.game.inventory.Bank
 import net.botwithus.kxapi.script.SuspendableScript

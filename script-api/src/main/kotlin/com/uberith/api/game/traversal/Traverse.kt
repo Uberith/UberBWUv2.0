@@ -1,5 +1,7 @@
-package com.uberith.api.game.world
+package com.uberith.api.game.traversal
 
+import com.uberith.api.game.world.Coordinates
+import com.uberith.api.game.world.Reachability
 import net.botwithus.kxapi.script.SuspendableScript
 import net.botwithus.rs3.entities.LocalPlayer
 import net.botwithus.rs3.minimenu.Action
@@ -7,6 +9,9 @@ import net.botwithus.rs3.minimenu.MiniMenu
 import net.botwithus.rs3.world.Coordinate
 import net.botwithus.rs3.world.Distance
 import net.botwithus.util.Rand
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
+import kotlin.math.hypot
 
 /**
  * Lightweight walking helpers for initiating movement to world coordinates.
@@ -17,7 +22,7 @@ import net.botwithus.util.Rand
  */
 object Traverse {
 
-    private val logger: org.slf4j.Logger = org.slf4j.LoggerFactory.getLogger(Traverse::class.java)
+    private val logger: Logger = LoggerFactory.getLogger(Traverse::class.java)
 
     private const val MAX_LOCAL_DISTANCE = 80
     private const val MAX_STEP_SIZE = 16
@@ -63,7 +68,7 @@ object Traverse {
 
         val dx = destination.x() - current.x()
         val dy = destination.y() - current.y()
-        val dist = kotlin.math.hypot(dx.toDouble(), dy.toDouble())
+        val dist = hypot(dx.toDouble(), dy.toDouble())
 
         val target = if (dist > stepSize) {
             val stepX = current.x() + (dx * stepSize / dist).toInt()
@@ -137,6 +142,3 @@ object Traverse {
         }
     }
 }
-
-
-
