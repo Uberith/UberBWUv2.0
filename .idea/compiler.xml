@@ -1,18 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="CompilerConfiguration">
-    <bytecodeTargetLevel target="24">
-      <module name="UberBWUv2.0.SkillingScripts.main" target="21" />
-      <module name="UberBWUv2.0.SkillingScripts.test" target="21" />
-      <module name="UberChop.script-api" target="24" />
-      <module name="UberChop.script-api.desktopMain" target="24" />
-      <module name="UberChop.script-api.desktopTest" target="24" />
-    </bytecodeTargetLevel>
+    <bytecodeTargetLevel target="24" />
   </component>
   <component name="JavacSettings">
     <option name="ADDITIONAL_OPTIONS_OVERRIDE">
       <module name="UberBWU2.0.SkillingScripts.UberChop.main" options="--patch-module &quot;UberChop=C:\Users\Lewis Matlock\IdeaProjects\UberBWUv2.0\SkillingScripts\UberChop\build\classes\kotlin\main;C:\Users\Lewis Matlock\IdeaProjects\UberBWUv2.0\SkillingScripts\UberChop\build\classes\java\main;C:\Users\Lewis Matlock\IdeaProjects\UberBWUv2.0\script-api\build\classes\kotlin\jvm\main;C:\Users\Lewis Matlock\IdeaProjects\UberBWUv2.0\script-api\build\classes\java\jvm\main&quot;" />
-      <module name="UberBWU2.0.script-api.desktopMain" options="--patch-module &quot;UberScriptAPI.main=C:\Users\Lewis Matlock\IdeaProjects\UberBWUv2.0\script-api\build\classes\kotlin\desktop\main&quot;" />
+      <module name="UberBWU2.0.SkillingScripts.UberMiner.main" options="--patch-module &quot;UberMiner=C:\Users\Lewis Matlock\IdeaProjects\UberBWUv2.0\SkillingScripts\UberMiner\build\classes\kotlin\main;C:\Users\Lewis Matlock\IdeaProjects\UberBWUv2.0\SkillingScripts\UberMiner\build\classes\java\main;C:\Users\Lewis Matlock\IdeaProjects\UberBWUv2.0\script-api\build\classes\kotlin\jvm\main;C:\Users\Lewis Matlock\IdeaProjects\UberBWUv2.0\script-api\build\classes\java\jvm\main&quot;" />
       <module name="UberBWU2.0.script-api.jvmMain" options="--patch-module &quot;UberScriptAPI.main=C:\Users\Lewis Matlock\IdeaProjects\UberBWUv2.0\script-api\build\classes\kotlin\jvm\main&quot;" />
     </option>
   </component>
