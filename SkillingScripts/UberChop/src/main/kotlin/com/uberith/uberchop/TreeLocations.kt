@@ -1,7 +1,7 @@
 package com.uberith.uberchop
 
-import com.uberith.api.game.skills.woodcutting.TreeType
-import com.uberith.api.game.skills.woodcutting.Trees
+import net.botwithus.kxapi.game.skills.woodcutting.TreeType
+import net.botwithus.kxapi.game.skills.woodcutting.Woodcutting
 import net.botwithus.rs3.world.Coordinate
 
 /**
@@ -12,7 +12,7 @@ object TreeLocations {
     val ALL: List<TreeLocation> = listOf(
         TreeLocation(
             name = "Anywhere",
-            availableTrees = TreeType.values().toList(),
+            availableTrees = TreeType.entries,
             chop = null,
             bank = null
         ),
@@ -167,7 +167,7 @@ object TreeLocations {
     fun locationsFor(type: TreeType): List<TreeLocation> = ALL.filter { type in it.availableTrees }
 
     fun locationsFor(name: String): List<TreeLocation> {
-        val type = Trees.resolveTreeType(name)
+        val type = Woodcutting.resolveTreeType(name)
         return if (type != null) locationsFor(type) else ALL.filter { it.name.contains(name, ignoreCase = true) }
     }
 }

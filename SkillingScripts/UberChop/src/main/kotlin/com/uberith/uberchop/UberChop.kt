@@ -3,10 +3,10 @@ package com.uberith.uberchop
 import net.botwithus.kxapi.script.SuspendableScript
 import com.google.gson.JsonObject
 import com.uberith.api.utils.ConfigStore
-import com.uberith.api.game.skills.woodcutting.Trees
 import com.uberith.api.game.world.Coordinates
 import com.uberith.uberchop.gui.UberChopGUI
 import net.botwithus.kxapi.game.inventory.BackpackExtensions
+import net.botwithus.kxapi.game.skills.woodcutting.Woodcutting
 import net.botwithus.rs3.stats.Stats
 import net.botwithus.rs3.world.Coordinate
 import net.botwithus.scripts.Info
@@ -203,7 +203,7 @@ class UberChop : SuspendableScript() {
 
         if (Coordinates.isPlayerWithinRadius(effectiveChopCoordinate(), 40)) return true
 
-        if (Trees.chop(this, targetTree)) {
+        if (Woodcutting.chop(this, targetTree)) {
             status = "Chopping $targetTree"
             logger.info("Chop target: '$targetTree'")
             return true

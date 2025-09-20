@@ -1,6 +1,6 @@
 package com.uberith.uberchop
 
-import com.uberith.api.game.skills.woodcutting.TreeType
+import net.botwithus.kxapi.game.skills.woodcutting.TreeType
 import net.botwithus.rs3.world.Coordinate
 
 /**

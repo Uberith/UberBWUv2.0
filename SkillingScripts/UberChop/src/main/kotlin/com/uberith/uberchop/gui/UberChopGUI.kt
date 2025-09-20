@@ -1,6 +1,5 @@
 package com.uberith.uberchop.gui
 
-import com.uberith.api.game.skills.woodcutting.Trees
 import com.uberith.uberchop.UberChop
 import com.uberith.uberchop.TreeLocations
 import net.botwithus.imgui.ImGui
@@ -11,6 +10,7 @@ import java.io.ByteArrayOutputStream
 import javax.imageio.ImageIO
 import com.uberith.api.ui.ColorManager
 import com.uberith.api.ui.CustomImages
+import net.botwithus.kxapi.game.skills.woodcutting.TreeType
 import net.botwithus.rs3.entities.LocalPlayer
 import net.botwithus.rs3.world.ClientState
 
@@ -994,8 +994,8 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         ImGui.popStyleColor(1)
     }
 
-    private fun resolveTreeType(name: String): com.uberith.api.game.skills.woodcutting.TreeType? {
-        val values = com.uberith.api.game.skills.woodcutting.TreeType.values()
+    private fun resolveTreeType(name: String): TreeType? {
+        val values = TreeType.entries.toTypedArray()
         val norm = name.trim().lowercase()
         // Prefer exact match on displayName or its short form without trailing " tree"
         val exact = values.firstOrNull { t ->

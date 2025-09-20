@@ -13,7 +13,6 @@ module UberScriptAPI.main {
     exports com.uberith.api.game.skills.magic;
     exports com.uberith.api.game.skills.firemaking;
     exports com.uberith.api.game.skills.fletching;
-    exports com.uberith.api.game.skills.woodcutting;
     exports com.uberith.api.ui;
     exports com.uberith.api.ui.imgui;
 }
