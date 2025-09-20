@@ -67,3 +67,7 @@ include(":script-api")
 include(":SkillingScripts")
 // Individual scripts
 include(":SkillingScripts:UberChop")
+
+include("SkillingScripts:UberMiner")
+include("SkillingScripts:UberChop:UberMiner")
+include("SkillingScripts:UberMiner")
