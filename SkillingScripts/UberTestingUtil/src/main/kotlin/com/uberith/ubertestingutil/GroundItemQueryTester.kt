@@ -1,4 +1,4 @@
-package com.uberith.uberminer
+package com.uberith.ubertestingutil
 
 import net.botwithus.rs3.cache.assets.items.ItemDefinition
 import net.botwithus.rs3.cache.assets.items.StackType
@@ -438,3 +438,4 @@ class GroundItemQueryTester {
     private fun safeValidity(item: GroundItem): Boolean? =
         runCatching { item.stack?.isValid }.getOrNull()
 }
+

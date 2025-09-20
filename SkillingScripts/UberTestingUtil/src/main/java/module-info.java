@@ -1,4 +1,4 @@
-module UberMiner {
+module UberTestingUtil {
     requires kotlin.stdlib;
     requires BotWithUs.api;
     requires BotWithUs.imgui;
@@ -7,7 +7,8 @@ module UberMiner {
     requires static xapi;
     requires static java.desktop;
 
-    opens com.uberith.uberminer to BotWithUs.api;
+    opens com.uberith.ubertestingutil to BotWithUs.api;
 
-    provides net.botwithus.scripts.Script with com.uberith.uberminer.UberMiner;
+    provides net.botwithus.scripts.Script with com.uberith.ubertestingutil.UberTestingUtil;
 }
+

@@ -1,11 +1,11 @@
-package com.uberith.uberminer
+package com.uberith.ubertestingutil
 
 import net.botwithus.imgui.ImGui
 import net.botwithus.ui.workspace.Workspace
 import net.botwithus.xapi.script.ui.interfaces.BuildableUI
 import kotlin.math.max
 
-class UberMinerGUI(private val script: UberMiner) : BuildableUI {
+class UberTestingUtilGUI(private val script: UberTestingUtil) : BuildableUI {
 
     fun preload() {
         // No resources to preload currently.
@@ -28,7 +28,7 @@ class UberMinerGUI(private val script: UberMiner) : BuildableUI {
         }
         val windowHeight = baseHeight + script.diagnosticsHeightBuffer().toFloat()
         ImGui.setNextWindowSize(WINDOW_WIDTH, windowHeight)
-        if (ImGui.begin("UberMiner", 0)) {
+        if (ImGui.begin("UberTestingUtil", 0)) {
             renderStatusSection()
             ImGui.separator()
             renderFilterSection()
@@ -155,3 +155,4 @@ class UberMinerGUI(private val script: UberMiner) : BuildableUI {
         private const val PICKUP_BUTTON_WIDTH = 220f
     }
 }
+

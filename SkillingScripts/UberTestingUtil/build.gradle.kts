@@ -6,7 +6,7 @@ plugins {
     kotlin("jvm")
 }
 
-group = "com.uberith.skillingscripts.uberminer"
+group = "com.uberith.skillingscripts.ubertestingutil"
 version = "1.0.0-SNAPSHOT"
 
 dependencies {
@@ -27,9 +27,10 @@ tasks.named<JavaCompile>("compileJava").configure {
         scriptApiJavaOut.get().asFile.path,
     )
     val patchPath = paths.joinToString(File.pathSeparator)
-    options.compilerArgs.addAll(listOf("--patch-module", "UberMiner=${patchPath}"))
+    options.compilerArgs.addAll(listOf("--patch-module", "UberTestingUtil=${patchPath}"))
 }
 
 tasks.named<KotlinCompile>("compileKotlin").configure {
     destinationDirectory.set(layout.buildDirectory.dir("classes/kotlin/main"))
 }
+

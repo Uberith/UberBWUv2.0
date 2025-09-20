@@ -1,4 +1,4 @@
-package com.uberith.uberminer
+package com.uberith.ubertestingutil
 
 import net.botwithus.kxapi.script.SuspendableScript
 import net.botwithus.rs3.item.GroundItem
@@ -11,14 +11,14 @@ import org.slf4j.LoggerFactory
 import kotlin.jvm.Volatile
 
 @Info(
-    name = "UberMiner",
+    name = "UberTestingUtil",
     description = "Scans ground items and logs nearby stacks.",
     version = "0.1.0",
     author = "Uberith"
 )
-class UberMiner : SuspendableScript() {
+class UberTestingUtil : SuspendableScript() {
 
-    private val log = LoggerFactory.getLogger(UberMiner::class.java)
+    private val log = LoggerFactory.getLogger(UberTestingUtil::class.java)
     @Volatile private var status: String = "Idle"
     @Volatile private var lastSummary: String? = null
     @Volatile private var lastScanAt: Long = 0L
@@ -34,7 +34,7 @@ class UberMiner : SuspendableScript() {
     @Volatile private var lastPickupAt: Long = 0L
 
     private val queryTester = GroundItemQueryTester()
-    private val gui by lazy { UberMinerGUI(this) }
+    private val gui by lazy { UberTestingUtilGUI(this) }
 
     override fun getStatus(): String? = status
 
@@ -49,12 +49,12 @@ class UberMiner : SuspendableScript() {
 
     override fun onActivation() {
         status = "Activating"
-        log.info("UberMiner activated. Beginning ground item scan.")
+        log.info("UberTestingUtil activated. Beginning ground item scan.")
     }
 
     override fun onDeactivation() {
         status = "Inactive"
-        log.info("UberMiner deactivated.")
+        log.info("UberTestingUtil deactivated.")
         lastSummary = null
         latestSnapshots = emptyList()
         latestDiagnostics = emptyList()
@@ -269,3 +269,4 @@ class UberMiner : SuspendableScript() {
         private const val PICKUP_ACTION = "Take"
     }
 }
+

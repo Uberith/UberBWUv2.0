@@ -10,8 +10,8 @@
             <option value="$PROJECT_DIR$" />
             <option value="$PROJECT_DIR$/SkillingScripts" />
             <option value="$PROJECT_DIR$/SkillingScripts/UberChop" />
-            <option value="$PROJECT_DIR$/SkillingScripts/UberChop/UberMiner" />
-            <option value="$PROJECT_DIR$/SkillingScripts/UberMiner" />
+            <option value="$PROJECT_DIR$/SkillingScripts/UberChop/UberTestingUtil" />
+            <option value="$PROJECT_DIR$/SkillingScripts/UberTestingUtil" />
             <option value="$PROJECT_DIR$/script-api" />
           </set>
         </option>
