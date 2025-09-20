@@ -203,38 +203,16 @@ class UberTestingUtil : SuspendableScript() {
         }
 
         var attempts = 0
-        var successes = 0
         val failures = mutableListOf<Int>()
 
         for (item in items.take(MAX_PICKUP_ATTEMPTS)) {
             attempts++
-            val interacted = try {
-                (item.interact(PICKUP_ACTION) as? Boolean) == true
+            try {
+                item.interact("Take")
+                log.info("Attempting to interact with ${item.options}")
             } catch (t: Throwable) {
                 log.debug("Pickup interaction failed for ground item ${item.id}: ${t.message}")
-                false
             }
-            if (interacted) {
-                successes++
-            } else {
-                failures += item.id
-            }
-        }
-
-        if (items.size > MAX_PICKUP_ATTEMPTS) {
-            lastPickupMessage = "Interacted with $attempts stack(s); $successes succeeded (limited)."
-        } else {
-            lastPickupMessage = "Interacted with $attempts stack(s); $successes succeeded."
-        }
-
-        if (successes > 0) {
-            log.info("Pickup attempt succeeded for $successes/$attempts stack(s).")
-        } else {
-            log.warn("Pickup attempt failed for $attempts stack(s).")
-        }
-
-        if (failures.isNotEmpty()) {
-            log.debug("Failed ground item ids: ${failures.joinToString()}")
         }
     }
 
