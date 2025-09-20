@@ -21,12 +21,13 @@ class UberMinerGUI(private val script: UberMiner) : BuildableUI {
 
     private fun renderPanel() {
         val diagnostics = script.diagnosticsResults()
-        val dynamicHeight = if (diagnostics.isEmpty()) {
+        val baseHeight = if (diagnostics.isEmpty()) {
             MIN_WINDOW_HEIGHT
         } else {
             max(MIN_WINDOW_HEIGHT, BASE_WINDOW_HEIGHT + diagnostics.size * DIAGNOSTIC_LINE_HEIGHT)
         }
-        ImGui.setNextWindowSize(WINDOW_WIDTH, dynamicHeight)
+        val windowHeight = baseHeight + script.diagnosticsHeightBuffer().toFloat()
+        ImGui.setNextWindowSize(WINDOW_WIDTH, windowHeight)
         if (ImGui.begin("UberMiner", 0)) {
             renderStatusSection()
             ImGui.separator()
@@ -63,23 +64,36 @@ class UberMinerGUI(private val script: UberMiner) : BuildableUI {
         val stacks = script.latestStacks()
         if (stacks.isEmpty()) {
             ImGui.text("No nearby stacks passed the filters.")
-            return
+        } else {
+            ImGui.text("Nearby stacks:")
+            var index = 1
+            for (snapshot in stacks.take(8)) {
+                val locationSuffix = snapshot.coordinate?.let { " @ ${script.formatCoordinate(it)}" } ?: ""
+                ImGui.text("${index}. ${snapshot.displayLabel}$locationSuffix")
+                index++
+            }
+            if (stacks.size > 8) {
+                ImGui.text("${stacks.size - 8} more stack(s) tracked")
+            }
         }
 
-        ImGui.text("Nearby stacks:")
-        var index = 1
-        for (snapshot in stacks.take(8)) {
-            val locationSuffix = snapshot.coordinate?.let { " @ ${script.formatCoordinate(it)}" } ?: ""
-            ImGui.text("${index}. ${snapshot.displayLabel}$locationSuffix")
-            index++
+        if (ImGui.button("Pick up matching items", PICKUP_BUTTON_WIDTH, 0f) && stacks.isNotEmpty()) {
+            script.requestPickup()
         }
-        if (stacks.size > 8) {
-            ImGui.text("${stacks.size - 8} more stack(s) tracked")
+
+        script.lastPickupResult()?.let { message ->
+            val ageMs = script.lastPickupAgeMs()
+            val suffix = if (ageMs < 0) "" else " (${formatDuration(ageMs)} ago)"
+            ImGui.text("Pickup: $message$suffix")
         }
     }
 
     private fun renderDiagnosticsSection(results: List<GroundItemQueryTester.TestResult>) {
         ImGui.text("GroundItemQuery diagnostics:")
+        var bufferPx = script.diagnosticsHeightBuffer()
+        bufferPx = adjustInt("Height buffer (px)", bufferPx, 0, 600, 20)
+        script.updateDiagnosticsHeightBuffer(bufferPx)
+
         val diagnosticsAge = script.lastDiagnosticsAgeMs()
         val diagnosticsLabel = if (diagnosticsAge < 0) {
             "Last run: Not yet"
@@ -138,5 +152,6 @@ class UberMinerGUI(private val script: UberMiner) : BuildableUI {
         private const val MIN_WINDOW_HEIGHT = 360f
         private const val BASE_WINDOW_HEIGHT = 260f
         private const val DIAGNOSTIC_LINE_HEIGHT = 18f
+        private const val PICKUP_BUTTON_WIDTH = 220f
     }
 }

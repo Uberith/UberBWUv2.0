@@ -28,6 +28,10 @@ class UberMiner : SuspendableScript() {
     @Volatile private var latestDiagnostics: List<GroundItemQueryTester.TestResult> = emptyList()
     @Volatile private var lastDiagnosticsCheckAt: Long = 0L
     @Volatile private var lastDiagnosticsFailureSignature: String? = null
+    @Volatile private var diagnosticsHeightBufferPx: Int = 0
+    @Volatile private var pickupRequested: Boolean = false
+    @Volatile private var lastPickupMessage: String? = null
+    @Volatile private var lastPickupAt: Long = 0L
 
     private val queryTester = GroundItemQueryTester()
     private val gui by lazy { UberMinerGUI(this) }
@@ -56,6 +60,10 @@ class UberMiner : SuspendableScript() {
         latestDiagnostics = emptyList()
         lastDiagnosticsCheckAt = 0L
         lastDiagnosticsFailureSignature = null
+        diagnosticsHeightBufferPx = 0
+        pickupRequested = false
+        lastPickupMessage = null
+        lastPickupAt = 0L
     }
 
     override suspend fun onLoop() {
@@ -69,6 +77,8 @@ class UberMiner : SuspendableScript() {
 
         val matchingItems = groundItems.filter { it.quantity >= scanMinStack }
         lastScanAt = System.currentTimeMillis()
+
+        handlePickupRequests(matchingItems)
 
         if (matchingItems.isEmpty()) {
             status = "No ground items"
@@ -142,6 +152,20 @@ class UberMiner : SuspendableScript() {
 
     fun lastDiagnosticsAgeMs(): Long = if (lastDiagnosticsCheckAt == 0L) -1 else System.currentTimeMillis() - lastDiagnosticsCheckAt
 
+    fun diagnosticsHeightBuffer(): Int = diagnosticsHeightBufferPx
+
+    fun updateDiagnosticsHeightBuffer(value: Int) {
+        diagnosticsHeightBufferPx = value.coerceIn(0, 600)
+    }
+
+    fun requestPickup() {
+        pickupRequested = true
+    }
+
+    fun lastPickupResult(): String? = lastPickupMessage
+
+    fun lastPickupAgeMs(): Long = if (lastPickupAt == 0L) -1 else System.currentTimeMillis() - lastPickupAt
+
     private fun maybeRunDiagnostics(groundItems: List<GroundItem>) {
         val now = System.currentTimeMillis()
         if (now - lastDiagnosticsCheckAt < DIAGNOSTIC_INTERVAL_MS) {
@@ -162,6 +186,55 @@ class UberMiner : SuspendableScript() {
             } else if (diagnostics.isNotEmpty()) {
                 log.info("GroundItemQuery diagnostics passing")
             }
+        }
+    }
+
+    private fun handlePickupRequests(items: List<GroundItem>) {
+        if (!pickupRequested) {
+            return
+        }
+        pickupRequested = false
+        lastPickupAt = System.currentTimeMillis()
+
+        if (items.isEmpty()) {
+            lastPickupMessage = "No matching stacks available."
+            log.info("Pickup requested but no matching ground items were found.")
+            return
+        }
+
+        var attempts = 0
+        var successes = 0
+        val failures = mutableListOf<Int>()
+
+        for (item in items.take(MAX_PICKUP_ATTEMPTS)) {
+            attempts++
+            val interacted = try {
+                (item.interact(PICKUP_ACTION) as? Boolean) == true
+            } catch (t: Throwable) {
+                log.debug("Pickup interaction failed for ground item ${item.id}: ${t.message}")
+                false
+            }
+            if (interacted) {
+                successes++
+            } else {
+                failures += item.id
+            }
+        }
+
+        if (items.size > MAX_PICKUP_ATTEMPTS) {
+            lastPickupMessage = "Interacted with $attempts stack(s); $successes succeeded (limited)."
+        } else {
+            lastPickupMessage = "Interacted with $attempts stack(s); $successes succeeded."
+        }
+
+        if (successes > 0) {
+            log.info("Pickup attempt succeeded for $successes/$attempts stack(s).")
+        } else {
+            log.warn("Pickup attempt failed for $attempts stack(s).")
+        }
+
+        if (failures.isNotEmpty()) {
+            log.debug("Failed ground item ids: ${failures.joinToString()}")
         }
     }
 
@@ -192,5 +265,7 @@ class UberMiner : SuspendableScript() {
 
     private companion object {
         private const val DIAGNOSTIC_INTERVAL_MS = 5_000L
+        private const val MAX_PICKUP_ATTEMPTS = 20
+        private const val PICKUP_ACTION = "Take"
     }
 }
