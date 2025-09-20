@@ -4,17 +4,6 @@
   <component name="GradleSettings">
     <option name="linkedExternalProjectsSettings">
       <GradleProjectSettings>
-        <option name="externalProjectPath" value="$PROJECT_DIR$/../BWU-V2-XAPI-KT" />
-        <option name="modules">
-          <set>
-            <option value="$PROJECT_DIR$/../BWU-V2-XAPI-KT" />
-          </set>
-        </option>
-      </GradleProjectSettings>
-      <GradleProjectSettings>
-        <option name="externalProjectPath" value="$PROJECT_DIR$/../BotWithUs-V2-API" />
-      </GradleProjectSettings>
-      <GradleProjectSettings>
         <option name="externalProjectPath" value="$PROJECT_DIR$/../BotWithUs-V2-XAPI" />
         <option name="modules">
           <set>

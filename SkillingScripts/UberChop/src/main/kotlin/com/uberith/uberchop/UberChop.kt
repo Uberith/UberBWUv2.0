@@ -185,7 +185,8 @@ class UberChop : SuspendableScript() {
 
     private suspend fun handleChoppingPhase(): Boolean {
         if (Backpack.isFull()) {
-            if (withdrawWoodBox && BackpackExtensions.interact("Fill",woodBoxPattern)) {
+            // TODO: Fix this
+            if (withdrawWoodBox && BackpackExtensions.interact("Fill", "woodBoxPattern")) {
                 if (Backpack.isFull()) {
                     phase = Phase.BANKING
                     return true

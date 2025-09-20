@@ -1,11 +1,10 @@
 package com.uberith.uberchop
 
 import net.botwithus.kxapi.game.inventory.BackpackExtensions
-import net.botwithus.kxapi.game.inventory.BankExtensions
+import net.botwithus.kxapi.game.inventory.Bank
 import net.botwithus.kxapi.script.SuspendableScript
 import net.botwithus.rs3.item.InventoryItem
 import net.botwithus.xapi.game.inventory.Backpack
-import net.botwithus.xapi.game.inventory.Bank
 import org.slf4j.LoggerFactory
 import java.util.regex.Pattern
 
@@ -77,7 +76,7 @@ object Equipment {
             logger.info("[Equipment] Bank must be open to empty the wood box")
             return false
         }
-        val emptied = BankExtensions.emptyBox(script, box.name, option)
+        val emptied = Bank.emptyBox(script, box.name, option)
         logger.info("[Equipment] Bank.emptyBox(option='{}') -> {}", option, emptied)
         return emptied
     }
