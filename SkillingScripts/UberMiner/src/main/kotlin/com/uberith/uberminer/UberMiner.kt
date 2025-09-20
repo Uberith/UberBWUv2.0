@@ -25,7 +25,11 @@ class UberMiner : SuspendableScript() {
     @Volatile private var latestSnapshots: List<GroundItemSnapshot> = emptyList()
     @Volatile private var minStackSizeValue: Int = 1
     @Volatile private var maxDistanceTiles: Int = 12
+    @Volatile private var latestDiagnostics: List<GroundItemQueryTester.TestResult> = emptyList()
+    @Volatile private var lastDiagnosticsCheckAt: Long = 0L
+    @Volatile private var lastDiagnosticsFailureSignature: String? = null
 
+    private val queryTester = GroundItemQueryTester()
     private val gui by lazy { UberMinerGUI(this) }
 
     override fun getStatus(): String? = status
@@ -49,24 +53,24 @@ class UberMiner : SuspendableScript() {
         log.info("UberMiner deactivated.")
         lastSummary = null
         latestSnapshots = emptyList()
+        latestDiagnostics = emptyList()
+        lastDiagnosticsCheckAt = 0L
+        lastDiagnosticsFailureSignature = null
     }
 
     override suspend fun onLoop() {
         val scanMinStack = minStackSizeValue
         val scanMaxDistance = maxDistanceTiles
 
-        val results = GroundItemQuery.newQuery()
-            .distance(scanMaxDistance.toDouble())
-            .results()
+        val distanceQuery = GroundItemQuery.newQuery().distance(scanMaxDistance.toDouble())
+        val groundItems = distanceQuery.results().toList()
 
-        val snapshots = mutableListOf<GroundItemSnapshot>()
-        for (item in results) {
-            if (item.quantity < scanMinStack) continue
-            snapshots.add(createSnapshot(item))
-        }
+        maybeRunDiagnostics(groundItems)
 
+        val matchingItems = groundItems.filter { it.quantity >= scanMinStack }
         lastScanAt = System.currentTimeMillis()
-        if (snapshots.isEmpty()) {
+
+        if (matchingItems.isEmpty()) {
             status = "No ground items"
             if (lastSummary != null) {
                 log.info("No ground items detected nearby.")
@@ -79,8 +83,10 @@ class UberMiner : SuspendableScript() {
             return
         }
 
-        status = "Tracking ${snapshots.size} stacks"
-        val sortedSnapshots = snapshots.sortedByDescending { it.quantity }
+        status = "Tracking ${matchingItems.size} stacks"
+        val sortedSnapshots = matchingItems
+            .map { createSnapshot(it) }
+            .sortedByDescending { it.quantity }
         latestSnapshots = sortedSnapshots.take(25)
 
         val summary = sortedSnapshots.take(5).joinToString { it.displayLabel }
@@ -88,7 +94,7 @@ class UberMiner : SuspendableScript() {
             log.info("Nearby stacks (min qty $scanMinStack, radius $scanMaxDistance): $summary")
             lastSummary = summary
         } else {
-            log.debug("Tracking ${snapshots.size} stacks (min qty $scanMinStack).")
+            log.debug("Tracking ${matchingItems.size} stacks (min qty $scanMinStack).")
         }
 
         awaitTicks(5)
@@ -132,6 +138,33 @@ class UberMiner : SuspendableScript() {
     fun formatCoordinate(coordinate: Coordinate): String =
         "${coordinate.x()}, ${coordinate.y()}, ${coordinate.z()}"
 
+    fun diagnosticsResults(): List<GroundItemQueryTester.TestResult> = latestDiagnostics
+
+    fun lastDiagnosticsAgeMs(): Long = if (lastDiagnosticsCheckAt == 0L) -1 else System.currentTimeMillis() - lastDiagnosticsCheckAt
+
+    private fun maybeRunDiagnostics(groundItems: List<GroundItem>) {
+        val now = System.currentTimeMillis()
+        if (now - lastDiagnosticsCheckAt < DIAGNOSTIC_INTERVAL_MS) {
+            return
+        }
+
+        val diagnostics = queryTester.runDiagnostics(groundItems)
+        latestDiagnostics = diagnostics
+        lastDiagnosticsCheckAt = now
+
+        val failureSignature = diagnostics.filter { it.status == GroundItemQueryTester.Status.FAILED }
+            .joinToString(",") { it.name }
+
+        if (failureSignature != lastDiagnosticsFailureSignature) {
+            lastDiagnosticsFailureSignature = failureSignature
+            if (failureSignature.isNotEmpty()) {
+                log.warn("GroundItemQuery diagnostics failing: $failureSignature")
+            } else if (diagnostics.isNotEmpty()) {
+                log.info("GroundItemQuery diagnostics passing")
+            }
+        }
+    }
+
     private fun createSnapshot(item: GroundItem): GroundItemSnapshot {
         val name = item.name?.takeIf { it.isNotBlank() } ?: "Item ${item.id}"
         val coordinate = try {
@@ -155,5 +188,9 @@ class UberMiner : SuspendableScript() {
     ) {
         val displayLabel: String
             get() = if (quantity > 1) "$name x$quantity" else name
+    }
+
+    private companion object {
+        private const val DIAGNOSTIC_INTERVAL_MS = 5_000L
     }
 }

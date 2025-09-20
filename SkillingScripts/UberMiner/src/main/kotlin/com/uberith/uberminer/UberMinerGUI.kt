@@ -3,6 +3,7 @@ package com.uberith.uberminer
 import net.botwithus.imgui.ImGui
 import net.botwithus.ui.workspace.Workspace
 import net.botwithus.xapi.script.ui.interfaces.BuildableUI
+import kotlin.math.max
 
 class UberMinerGUI(private val script: UberMiner) : BuildableUI {
 
@@ -19,13 +20,21 @@ class UberMinerGUI(private val script: UberMiner) : BuildableUI {
     }
 
     private fun renderPanel() {
-        ImGui.setNextWindowSize(420f, 320f)
+        val diagnostics = script.diagnosticsResults()
+        val dynamicHeight = if (diagnostics.isEmpty()) {
+            MIN_WINDOW_HEIGHT
+        } else {
+            max(MIN_WINDOW_HEIGHT, BASE_WINDOW_HEIGHT + diagnostics.size * DIAGNOSTIC_LINE_HEIGHT)
+        }
+        ImGui.setNextWindowSize(WINDOW_WIDTH, dynamicHeight)
         if (ImGui.begin("UberMiner", 0)) {
             renderStatusSection()
             ImGui.separator()
             renderFilterSection()
             ImGui.separator()
             renderStacksSection()
+            ImGui.separator()
+            renderDiagnosticsSection(diagnostics)
         }
         ImGui.end()
     }
@@ -69,6 +78,26 @@ class UberMinerGUI(private val script: UberMiner) : BuildableUI {
         }
     }
 
+    private fun renderDiagnosticsSection(results: List<GroundItemQueryTester.TestResult>) {
+        ImGui.text("GroundItemQuery diagnostics:")
+        val diagnosticsAge = script.lastDiagnosticsAgeMs()
+        val diagnosticsLabel = if (diagnosticsAge < 0) {
+            "Last run: Not yet"
+        } else {
+            "Last run: ${formatDuration(diagnosticsAge)} ago"
+        }
+        ImGui.text(diagnosticsLabel)
+
+        if (results.isEmpty()) {
+            ImGui.text("Waiting for diagnostic data...")
+            return
+        }
+
+        for (result in results) {
+            ImGui.text("[${statusTag(result.status)}] ${result.name}: ${result.detail}")
+        }
+    }
+
     private fun adjustInt(label: String, value: Int, min: Int, max: Int, step: Int): Int {
         var current = value
         val id = label.replace(' ', '_')
@@ -86,6 +115,12 @@ class UberMinerGUI(private val script: UberMiner) : BuildableUI {
         return current
     }
 
+    private fun statusTag(status: GroundItemQueryTester.Status): String = when (status) {
+        GroundItemQueryTester.Status.PASSED -> "PASS"
+        GroundItemQueryTester.Status.FAILED -> "FAIL"
+        GroundItemQueryTester.Status.SKIPPED -> "SKIP"
+    }
+
     private fun formatDuration(ms: Long): String {
         val totalSeconds = (ms / 1000).coerceAtLeast(0)
         val hours = totalSeconds / 3600
@@ -96,5 +131,12 @@ class UberMinerGUI(private val script: UberMiner) : BuildableUI {
         } else {
             String.format("%02d:%02d", minutes, seconds)
         }
+    }
+
+    private companion object {
+        private const val WINDOW_WIDTH = 420f
+        private const val MIN_WINDOW_HEIGHT = 360f
+        private const val BASE_WINDOW_HEIGHT = 260f
+        private const val DIAGNOSTIC_LINE_HEIGHT = 18f
     }
 }
