@@ -140,22 +140,6 @@ class UberChop : SuspendableScript() {
         return (perMs * 3_600_000.0).toInt()
     }
 
-    private fun loadSettings(logOnFailure: Boolean = true): Boolean {
-        val loaded = settingsStore.load(logOnFailure) ?: return false
-        settings = loaded
-        return true
-    }
-
-    private fun persistSettings(successMessage: String? = null, errorMessage: String? = null) {
-        settings.savedLocation = location
-        val saved = settingsStore.save(settings, logOnFailure = errorMessage != null)
-        if (saved) {
-            successMessage?.let { logger.info(it) }
-        } else {
-            errorMessage?.let { logger.error(it) }
-        }
-    }
-
     private fun updateRuntimeSnapshot() {
         val now = System.currentTimeMillis()
         if (lastRuntimeUpdateMs != 0L) {
@@ -165,6 +149,7 @@ class UberChop : SuspendableScript() {
         WCLevel = Stats.WOODCUTTING.currentLevel
     }
 
+    // Phase management
     private fun transitionPhase(next: Phase, message: String? = null) {
         message?.let { logger.info(it) }
         phase = next
@@ -263,6 +248,22 @@ class UberChop : SuspendableScript() {
         return opened
     }
 
+    private fun loadSettings(logOnFailure: Boolean = true): Boolean {
+        val loaded = settingsStore.load(logOnFailure) ?: return false
+        settings = loaded
+        return true
+    }
+
+    private fun persistSettings(successMessage: String? = null, errorMessage: String? = null) {
+        settings.savedLocation = location
+        val saved = settingsStore.save(settings, logOnFailure = errorMessage != null)
+        if (saved) {
+            successMessage?.let { logger.info(it) }
+        } else {
+            errorMessage?.let { logger.error(it) }
+        }
+    }
+
     private fun refreshDerivedPreferences() {
         val names = TreeTypes.ALL
         val treeIndex = settings.savedTreeType.coerceIn(0, names.lastIndex)
@@ -277,6 +278,7 @@ class UberChop : SuspendableScript() {
         settings.savedLocation = location
     }
 
+    // Location helpers
     private fun selectedLocation(): TreeLocation? = treeLocations.firstOrNull { it.name == location }
 
     private fun effectiveChopCoordinate(): Coordinate? =
@@ -293,3 +295,4 @@ class UberChop : SuspendableScript() {
     private fun toCoordinate(x: Int?, y: Int?, z: Int?): Coordinate? =
         if (x != null && y != null && z != null) Coordinate(x, y, z) else null
 }
+
