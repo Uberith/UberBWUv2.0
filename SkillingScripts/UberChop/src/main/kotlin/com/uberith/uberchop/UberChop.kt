@@ -1,8 +1,8 @@
 package com.uberith.uberchop
 
+import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.uberith.api.game.world.Coordinates
-import com.uberith.api.utils.ConfigStore
 import com.uberith.uberchop.gui.UberChopGUI
 import net.botwithus.kxapi.game.skills.woodcutting.Woodcutting
 import net.botwithus.kxapi.script.SuspendableScript
@@ -39,9 +39,8 @@ class UberChop : SuspendableScript() {
     @get:JvmName("getStatusText") var status: String = "Idle"
     @Volatile var phase: Phase = Phase.READY
     var WCLevel = Stats.WOODCUTTING.currentLevel
-
+    private val gson = Gson()
     private val logger: Logger = LoggerFactory.getLogger(this::class.java)
-    private val settingsStore = ConfigStore<Settings>("UberChop", Settings::class.java)
     private var totalRuntimeMs: Long = 0L
     private var lastRuntimeUpdateMs: Long = 0L
     @Volatile private var uiInitialized: Boolean = false
@@ -59,15 +58,12 @@ class UberChop : SuspendableScript() {
     override fun onInitialize() {
         super.onInitialize()
         try { gui.preload() } catch (_: Throwable) { }
-        loadSettings()
         refreshDerivedPreferences()
     }
 
     override fun onActivation() {
         super.onActivation()
-        loadSettings()
         refreshDerivedPreferences()
-        persistSettings()
         logger.info("Activated: tree='{}', location='{}' (locations={})", targetTree, location, treeLocations.size)
         status = "Active - Preparing"
         phase = Phase.PREPARING
@@ -77,9 +73,9 @@ class UberChop : SuspendableScript() {
 
     override fun onDeactivation() {
         super.onDeactivation()
+        performSavePersistentData()
         status = "Inactive"
         phase = Phase.READY
-        persistSettings("Saved UberChop settings on deactivation", "Failed to save UberChop settings on deactivation")
         logger.info("Deactivated")
     }
 
@@ -96,12 +92,14 @@ class UberChop : SuspendableScript() {
 
     override suspend fun buildUI(): BuildableUI = gui
 
-    override suspend fun saveData(data: JsonObject) {
-        persistSettings()
+    override fun saveData(data: JsonObject) {
+        data.add("settings", gson.toJsonTree(settings).asJsonObject)
     }
 
-    override suspend fun loadData(data: JsonObject) {
-        loadSettings()
+    override fun loadData(data: JsonObject) {
+        data.getAsJsonObject("settings")?.let { obj ->
+            settings = gson.fromJson(obj, Settings::class.java)
+        }
         refreshDerivedPreferences()
     }
 
@@ -116,13 +114,12 @@ class UberChop : SuspendableScript() {
 
     fun ensureUiSettingsLoaded() {
         if (uiInitialized) return
-        loadSettings(logOnFailure = false)
         refreshDerivedPreferences()
         uiInitialized = true
     }
 
     fun onSettingsChanged() {
-        persistSettings()
+        performSavePersistentData()
     }
 
     fun formattedRuntime(): String {
@@ -248,21 +245,6 @@ class UberChop : SuspendableScript() {
         return opened
     }
 
-    private fun loadSettings(logOnFailure: Boolean = true): Boolean {
-        val loaded = settingsStore.load(logOnFailure) ?: return false
-        settings = loaded
-        return true
-    }
-
-    private fun persistSettings(successMessage: String? = null, errorMessage: String? = null) {
-        settings.savedLocation = location
-        val saved = settingsStore.save(settings, logOnFailure = errorMessage != null)
-        if (saved) {
-            successMessage?.let { logger.info(it) }
-        } else {
-            errorMessage?.let { logger.error(it) }
-        }
-    }
 
     private fun refreshDerivedPreferences() {
         val names = TreeTypes.ALL
