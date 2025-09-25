@@ -5,10 +5,13 @@ import net.botwithus.rs3.item.GroundItem
 import net.botwithus.rs3.world.Coordinate
 import net.botwithus.scripts.Info
 import net.botwithus.ui.workspace.Workspace
+import net.botwithus.xapi.game.traversal.LodestoneNetwork
+import net.botwithus.xapi.game.traversal.enums.LodestoneType
 import net.botwithus.xapi.query.GroundItemQuery
 import net.botwithus.xapi.script.ui.interfaces.BuildableUI
 import org.slf4j.LoggerFactory
 import kotlin.jvm.Volatile
+import java.util.Locale
 
 @Info(
     name = "UberTestingUtil",
@@ -32,6 +35,10 @@ class UberTestingUtil : SuspendableScript() {
     @Volatile private var pickupRequested: Boolean = false
     @Volatile private var lastPickupMessage: String? = null
     @Volatile private var lastPickupAt: Long = 0L
+    @Volatile private var selectedLodestone: LodestoneType = LodestoneType.BURTHORPE
+    @Volatile private var lodestoneTeleportRequest: LodestoneType? = null
+    @Volatile private var lastLodestoneMessage: String? = null
+    @Volatile private var lastLodestoneAt: Long = 0L
 
     private val queryTester = GroundItemQueryTester()
     private val gui by lazy { UberTestingUtilGUI(this) }
@@ -64,9 +71,15 @@ class UberTestingUtil : SuspendableScript() {
         pickupRequested = false
         lastPickupMessage = null
         lastPickupAt = 0L
+        selectedLodestone = LodestoneType.BURTHORPE
+        lodestoneTeleportRequest = null
+        lastLodestoneMessage = null
+        lastLodestoneAt = 0L
     }
 
     override suspend fun onLoop() {
+        processLodestoneTeleportRequest()
+
         val scanMinStack = minStackSizeValue
         val scanMaxDistance = maxDistanceTiles
 
@@ -166,6 +179,38 @@ class UberTestingUtil : SuspendableScript() {
 
     fun lastPickupAgeMs(): Long = if (lastPickupAt == 0L) -1 else System.currentTimeMillis() - lastPickupAt
 
+    fun selectedLodestone(): LodestoneType = selectedLodestone
+
+    fun updateSelectedLodestone(value: LodestoneType) {
+        selectedLodestone = value
+    }
+
+    fun requestLodestoneTeleport() {
+        lodestoneTeleportRequest = selectedLodestone
+    }
+
+    fun isLodestoneUnlocked(type: LodestoneType): Boolean = try {
+        type.isAvailable()
+    } catch (t: Throwable) {
+        log.debug("Failed to evaluate availability for lodestone {}: {}", type.name, t.message)
+        false
+    }
+
+    fun lodestoneNetworkOpen(): Boolean = try {
+        LodestoneNetwork.isOpen()
+    } catch (_: Throwable) {
+        false
+    }
+
+    fun lastLodestoneTeleportResult(): String? = lastLodestoneMessage
+
+    fun lastLodestoneTeleportAgeMs(): Long = if (lastLodestoneAt == 0L) -1 else System.currentTimeMillis() - lastLodestoneAt
+
+    fun formatLodestoneName(type: LodestoneType): String = type.name
+        .lowercase(Locale.ROOT)
+        .split('_')
+        .joinToString(" ") { part -> part.replaceFirstChar { ch -> ch.uppercaseChar() } }
+
     private fun maybeRunDiagnostics(groundItems: List<GroundItem>) {
         val now = System.currentTimeMillis()
         if (now - lastDiagnosticsCheckAt < DIAGNOSTIC_INTERVAL_MS) {
@@ -239,6 +284,36 @@ class UberTestingUtil : SuspendableScript() {
     ) {
         val displayLabel: String
             get() = if (quantity > 1) "$name x$quantity" else name
+    }
+
+    private suspend fun processLodestoneTeleportRequest() {
+        val target = lodestoneTeleportRequest ?: return
+        lodestoneTeleportRequest = null
+        val destinationName = formatLodestoneName(target)
+
+        if (!isLodestoneUnlocked(target)) {
+            lastLodestoneMessage = "$destinationName is locked."
+            lastLodestoneAt = System.currentTimeMillis()
+            log.info("Lodestone teleport request ignored: {} is locked.", destinationName)
+            return
+        }
+
+        status = "Teleporting to $destinationName"
+        try {
+            val result = target.teleport(this)
+            lastLodestoneMessage = if (result) {
+                log.info("Teleporting via lodestone to {}", destinationName)
+                "Teleport initiated to $destinationName."
+            } else {
+                log.warn("Teleport attempt to {} failed to start.", destinationName)
+                "Failed to teleport to $destinationName."
+            }
+        } catch (t: Throwable) {
+            lastLodestoneMessage = "Error teleporting to $destinationName."
+            log.error("Unexpected error during lodestone teleport to {}: {}", destinationName, t.message, t)
+        } finally {
+            lastLodestoneAt = System.currentTimeMillis()
+        }
     }
 
     private companion object {

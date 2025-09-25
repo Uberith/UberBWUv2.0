@@ -197,11 +197,13 @@ class UberChop : SuspendableScript() {
         }
     }
 
-    private fun setStatus(next: String) {
+    override fun setStatus(next: String): Boolean {
         if (status != next) {
             status = next
             logger.info("Status -> {}", next)
+            return true
         }
+        return false
     }
 
     private fun preparingWaitOrTimeout(reason: String): Boolean {
@@ -390,7 +392,7 @@ class UberChop : SuspendableScript() {
 
     private suspend fun openBankIfNeeded(): Boolean {
         if (Bank.isOpen()) return false
-        val opened = runCatching { Bank.open(this) }
+        val opened = runCatching { Bank.open() }
             .onFailure { logger.error("Bank.open() threw", it) }
             .getOrDefault(false)
         logger.info("Bank.open() -> {}", opened)

@@ -1,10 +1,9 @@
 package com.uberith.uberchop
 
-import net.botwithus.kxapi.game.inventory.BackpackExtensions
 import net.botwithus.kxapi.game.inventory.Bank
 import net.botwithus.kxapi.script.SuspendableScript
 import net.botwithus.rs3.item.InventoryItem
-import net.botwithus.xapi.game.inventory.Backpack
+import net.botwithus.kxapi.game.inventory.Backpack
 import org.slf4j.LoggerFactory
 import java.util.regex.Pattern
 
@@ -54,7 +53,7 @@ object Equipment {
             logger.info("[Equipment] No wood box found to fill")
             return false
         }
-        val interacted = BackpackExtensions.interact(box, option)
+        val interacted = Backpack.interact(box, option)
         logger.info("[Equipment] Backpack.interact('{}') -> {}", option, interacted)
         if (interacted) {
             script.awaitTicks(1)

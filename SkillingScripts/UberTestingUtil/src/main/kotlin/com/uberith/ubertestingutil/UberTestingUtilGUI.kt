@@ -2,6 +2,7 @@ package com.uberith.ubertestingutil
 
 import net.botwithus.imgui.ImGui
 import net.botwithus.ui.workspace.Workspace
+import net.botwithus.xapi.game.traversal.enums.LodestoneType
 import net.botwithus.xapi.script.ui.interfaces.BuildableUI
 import kotlin.math.max
 
@@ -29,15 +30,29 @@ class UberTestingUtilGUI(private val script: UberTestingUtil) : BuildableUI {
         val windowHeight = baseHeight + script.diagnosticsHeightBuffer().toFloat()
         ImGui.setNextWindowSize(WINDOW_WIDTH, windowHeight)
         if (ImGui.begin("UberTestingUtil", 0)) {
-            renderStatusSection()
-            ImGui.separator()
-            renderFilterSection()
-            ImGui.separator()
-            renderStacksSection()
-            ImGui.separator()
-            renderDiagnosticsSection(diagnostics)
+            if (ImGui.beginTabBar("UberTestingUtilTabs", 0)) {
+                if (ImGui.beginTabItem("Ground Items", 0)) {
+                    renderGroundItemsTab(diagnostics)
+                    ImGui.endTabItem()
+                }
+                if (ImGui.beginTabItem("Lodestone Network", 0)) {
+                    renderLodestoneTab()
+                    ImGui.endTabItem()
+                }
+                ImGui.endTabBar()
+            }
         }
         ImGui.end()
+    }
+
+    private fun renderGroundItemsTab(diagnostics: List<GroundItemQueryTester.TestResult>) {
+        renderStatusSection()
+        ImGui.separator()
+        renderFilterSection()
+        ImGui.separator()
+        renderStacksSection()
+        ImGui.separator()
+        renderDiagnosticsSection(diagnostics)
     }
 
     private fun renderStatusSection() {
@@ -112,6 +127,48 @@ class UberTestingUtilGUI(private val script: UberTestingUtil) : BuildableUI {
         }
     }
 
+    private fun renderLodestoneTab() {
+        val lodestones = LodestoneType.values()
+        val selected = script.selectedLodestone()
+        val preview = script.formatLodestoneName(selected)
+
+        if (ImGui.beginCombo("Destination", preview, 0)) {
+            for (lodestone in lodestones) {
+                val label = buildString {
+                    append(script.formatLodestoneName(lodestone))
+                    if (!script.isLodestoneUnlocked(lodestone)) {
+                        append(" (Locked)")
+                    }
+                }
+                val isSelected = lodestone == selected
+                if (ImGui.selectable(label, isSelected, 0, 0f, 0f)) {
+                    script.updateSelectedLodestone(lodestone)
+                }
+                if (isSelected) {
+                    ImGui.setItemDefaultFocus()
+                }
+            }
+            ImGui.endCombo()
+        }
+
+        ImGui.separator()
+
+        val networkStatus = if (script.lodestoneNetworkOpen()) "Open" else "Closed"
+        ImGui.text("Network interface: $networkStatus")
+        val availability = if (script.isLodestoneUnlocked(selected)) "Unlocked" else "Locked"
+        ImGui.text("Selected lodestone: $availability")
+
+        if (ImGui.button("Teleport via Lodestone", TELEPORT_BUTTON_WIDTH, 0f)) {
+            script.requestLodestoneTeleport()
+        }
+
+        script.lastLodestoneTeleportResult()?.let { message ->
+            val ageMs = script.lastLodestoneTeleportAgeMs()
+            val suffix = if (ageMs < 0) "" else " (${formatDuration(ageMs)} ago)"
+            ImGui.text("Teleport: $message$suffix")
+        }
+    }
+
     private fun adjustInt(label: String, value: Int, min: Int, max: Int, step: Int): Int {
         var current = value
         val id = label.replace(' ', '_')
@@ -153,6 +210,7 @@ class UberTestingUtilGUI(private val script: UberTestingUtil) : BuildableUI {
         private const val BASE_WINDOW_HEIGHT = 260f
         private const val DIAGNOSTIC_LINE_HEIGHT = 18f
         private const val PICKUP_BUTTON_WIDTH = 220f
+        private const val TELEPORT_BUTTON_WIDTH = 240f
     }
 }
 
