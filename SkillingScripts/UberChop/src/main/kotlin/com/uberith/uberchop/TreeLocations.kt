@@ -1,7 +1,6 @@
 package com.uberith.uberchop
 
 import net.botwithus.kxapi.game.skilling.impl.woodcutting.TreeType
-import net.botwithus.kxapi.game.skilling.impl.woodcutting.Woodcutting
 import net.botwithus.rs3.world.Coordinate
 
 /**
@@ -167,7 +166,7 @@ object TreeLocations {
     fun locationsFor(type: TreeType): List<TreeLocation> = ALL.filter { type in it.availableTrees }
 
     fun locationsFor(name: String): List<TreeLocation> {
-        val type = Woodcutting.resolveTreeType(name)
+        val type = TreeTypes.resolve(name)
         return if (type != null) locationsFor(type) else ALL.filter { it.name.contains(name, ignoreCase = true) }
     }
 }

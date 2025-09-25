@@ -1,6 +1,6 @@
 package com.uberith.uberchop
 
-import net.botwithus.kxapi.game.skilling.impl.woodcutting.Woodcutting
+import net.botwithus.kxapi.game.skilling.impl.woodcutting.TreeType
 
 
 data class Settings(
@@ -77,7 +77,26 @@ data class Settings(
 // Central list of supported tree types for selection and matching.
 // Names are matched using case-insensitive contains(...) in targeting logic.
 object TreeTypes {
-    val ALL: List<String> = Woodcutting.allNamesCamelCase()
+    private val values = TreeType.entries
+
+    val ALL: List<String> = values.map { it.displayName }
+
+    fun resolve(name: String): TreeType? {
+        val norm = name.trim().lowercase()
+        if (norm.isEmpty()) return null
+
+        val exact = values.firstOrNull { type ->
+            val display = type.displayName.trim().lowercase()
+            val short = display.removeSuffix(" tree")
+            norm == display || norm == short
+        }
+        if (exact != null) return exact
+
+        return values.firstOrNull { type ->
+            val display = type.displayName.trim().lowercase()
+            display.contains(norm) || norm.contains(display)
+        }
+    }
 }
 
 // Serializable container for user overrides of location tiles
@@ -89,3 +108,4 @@ data class CustomLocation(
     var bankY: Int? = null,
     var bankZ: Int? = null
 )
+

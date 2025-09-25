@@ -4,7 +4,8 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.uberith.api.game.world.Coordinates
 import com.uberith.uberchop.gui.UberChopGUI
-import net.botwithus.kxapi.game.skilling.impl.woodcutting.Woodcutting
+import net.botwithus.kxapi.game.skilling.impl.woodcutting.woodcutting
+import net.botwithus.kxapi.game.skilling.skilling
 import net.botwithus.kxapi.script.SuspendableScript
 import net.botwithus.rs3.stats.Stats
 import net.botwithus.rs3.world.Coordinate
@@ -36,7 +37,9 @@ class UberChop : SuspendableScript() {
     var targetTree: String = "Tree"
     var location: String = ""
     var logsChopped: Int = 0
-    @get:JvmName("getStatusText") var status: String = "Idle"
+    @get:JvmName("getStatusText")
+    var status: String = "Idle"
+        private set
     @Volatile var phase: Phase = Phase.READY
     var WCLevel = Stats.WOODCUTTING.currentLevel
     private val gson = Gson()
@@ -44,6 +47,30 @@ class UberChop : SuspendableScript() {
     private var totalRuntimeMs: Long = 0L
     private var lastRuntimeUpdateMs: Long = 0L
     @Volatile private var uiInitialized: Boolean = false
+    @Volatile private var preppingDetailsLogged: Boolean = false
+
+    private data class CustomLocationSnapshot(
+        val chopX: Int?,
+        val chopY: Int?,
+        val chopZ: Int?,
+        val bankX: Int?,
+        val bankY: Int?,
+        val bankZ: Int?
+    )
+
+    private data class LocationSnapshot(
+        val locationName: String,
+        val custom: CustomLocationSnapshot?,
+        val selected: TreeLocation?,
+        val chop: Coordinate?,
+        val bank: Coordinate?
+    )
+
+    @Volatile private var cachedLocationSnapshot: LocationSnapshot? = null
+
+    private fun invalidateLocationSnapshot() {
+        cachedLocationSnapshot = null
+    }
 
     private val shouldUseWoodBox: Boolean
         get() = settings.withdrawWoodBox
@@ -65,8 +92,8 @@ class UberChop : SuspendableScript() {
         super.onActivation()
         refreshDerivedPreferences()
         logger.info("Activated: tree='{}', location='{}' (locations={})", targetTree, location, treeLocations.size)
-        status = "Active - Preparing"
-        phase = Phase.PREPARING
+        setStatus("Active - Preparing")
+        transitionPhase(Phase.PREPARING, "Phase: READY -> PREPARING (activation)")
         totalRuntimeMs = 0L
         lastRuntimeUpdateMs = System.currentTimeMillis()
     }
@@ -74,19 +101,24 @@ class UberChop : SuspendableScript() {
     override fun onDeactivation() {
         super.onDeactivation()
         performSavePersistentData()
-        status = "Inactive"
+        setStatus("Inactive")
         phase = Phase.READY
         logger.info("Deactivated")
     }
 
     override suspend fun onLoop() {
         updateRuntimeSnapshot()
-
-        when (phase) {
-            Phase.READY -> transitionPhase(Phase.PREPARING, "Phase: READY -> PREPARING")
-            Phase.PREPARING -> if (handlePreparingPhase()) return
-            Phase.BANKING -> if (handleBankingPhase()) return
-            Phase.CHOPPING -> if (handleChoppingPhase()) return
+        try {
+            when (phase) {
+                Phase.READY -> transitionPhase(Phase.PREPARING, "Phase: READY -> PREPARING")
+                Phase.PREPARING -> if (handlePreparingPhase()) return
+                Phase.BANKING -> if (handleBankingPhase()) return
+                Phase.CHOPPING -> if (handleChoppingPhase()) return
+            }
+        } catch (t: Throwable) {
+            logger.error("Unhandled exception while executing phase {}", phase, t)
+            setStatus("Error: ${t.message ?: t::class.simpleName}")
+            awaitTicks(1)
         }
     }
 
@@ -120,6 +152,7 @@ class UberChop : SuspendableScript() {
 
     fun onSettingsChanged() {
         performSavePersistentData()
+        invalidateLocationSnapshot()
     }
 
     fun formattedRuntime(): String {
@@ -149,77 +182,173 @@ class UberChop : SuspendableScript() {
     // Phase management
     private fun transitionPhase(next: Phase, message: String? = null) {
         message?.let { logger.info(it) }
+        if (phase != next) {
+            logger.debug("Phase transition {} -> {}", phase, next)
+        }
         phase = next
+        if (next == Phase.PREPARING) {
+            preppingDetailsLogged = false
+        }
+    }
+
+    private fun setStatus(next: String) {
+        if (status != next) {
+            status = next
+            logger.info("Status -> {}", next)
+        }
     }
 
     private suspend fun handlePreparingPhase(): Boolean {
-        logger.info("Preparing target='{}', location='{}'", targetTree, location)
-        logger.debug(
-            "Preparing: withdrawWoodBox={}, worldHop={}, notepaper={}, crystallise={}, rotation={}, pickupNests={}",
-            shouldUseWoodBox,
-            settings.enableWorldHopping,
-            settings.useMagicNotepaper,
-            settings.useCrystallise,
-            settings.enableTreeRotation,
-            settings.pickupNests
-        )
+        if (!preppingDetailsLogged) {
+            logger.info("Preparing target='{}', location='{}'", targetTree, location)
+            logger.debug(
+                "Preparing: withdrawWoodBox={}, worldHop={}, notepaper={}, crystallise={}, rotation={}, pickupNests={}",
+                shouldUseWoodBox,
+                settings.enableWorldHopping,
+                settings.useMagicNotepaper,
+                settings.useCrystallise,
+                settings.enableTreeRotation,
+                settings.pickupNests
+            )
+            val prepChop = effectiveChopCoordinate()
+            val prepBank = effectiveBankCoordinate()
+            logger.debug("Preparing: chopTile={}, bankTile={}", prepChop ?: "none", prepBank ?: "none")
+            preppingDetailsLogged = true
+        }
 
-        val prepChop = effectiveChopCoordinate()
-        val prepBank = effectiveBankCoordinate()
-        logger.debug("Preparing: chopTile={}, bankTile={}", prepChop ?: "none", prepBank ?: "none")
+        val bankTarget = effectiveBankCoordinate()
 
         if (!shouldUseWoodBox) {
-            transitionPhase(Phase.CHOPPING, "Phase: PREPARING -> CHOPPING")
+            setStatus("Ready to chop $targetTree")
+            transitionPhase(Phase.CHOPPING, "Phase: PREPARING -> CHOPPING (wood box disabled)")
             return false
         }
 
-        awaitIdle()
-        if (Coordinates.isPlayerWithinRadius(prepBank, BANK_RADIUS)) return true
-        if (openBankIfNeeded()) return true
-        if (Equipment.ensureWoodBox(this)) return true
+        setStatus("Preparing supplies")
+
+        if (bankTarget == null) {
+            logger.warn("Wood box enabled but no bank coordinate for location='{}'; continuing without banking prep", location)
+            transitionPhase(Phase.CHOPPING, "Phase: PREPARING -> CHOPPING (no bank target)")
+            return false
+        }
+
+        if (!Coordinates.isPlayerWithinRadius(bankTarget, BANK_RADIUS)) {
+            setStatus("Moving to bank")
+            if (!Bank.isOpen()) {
+                openBankIfNeeded()
+            }
+            return true
+        }
+
+        if (!Bank.isOpen()) {
+            setStatus("Opening bank")
+            if (openBankIfNeeded()) {
+                return true
+            }
+            logger.warn("Bank failed to open near location='{}'; will retry", location)
+            return true
+        }
+
+        if (!Equipment.hasWoodBox()) {
+            setStatus("Withdrawing wood box")
+            val withdrew = runCatching { Equipment.ensureWoodBox(this) }
+                .onFailure { logger.error("Failed to withdraw wood box", it) }
+                .getOrDefault(false)
+            if (withdrew) {
+                awaitTicks(1)
+                return true
+            }
+            if (!Equipment.hasWoodBox()) {
+                logger.warn("No wood box retrieved; proceeding without to avoid stalling")
+            }
+        }
 
         transitionPhase(Phase.CHOPPING, "Phase: PREPARING -> CHOPPING")
+        setStatus("Ready to chop $targetTree")
         return false
     }
 
     private suspend fun handleBankingPhase(): Boolean {
-        awaitIdle()
-        if (Coordinates.isPlayerWithinRadius(effectiveBankCoordinate(), BANK_RADIUS)) return true
-        if (openBankIfNeeded()) return true
-        if (shouldUseWoodBox && Equipment.ensureWoodBox(this)) return true
+        val bankTarget = effectiveBankCoordinate()
+        setStatus("Banking logs")
 
-        if (!Backpack.isFull()) {
-            transitionPhase(Phase.CHOPPING, "Phase: BANKING -> CHOPPING")
-            return false
+        if (bankTarget != null && !Coordinates.isPlayerWithinRadius(bankTarget, BANK_RADIUS)) {
+            setStatus("Returning to bank")
+            if (!Bank.isOpen()) {
+                openBankIfNeeded()
+            }
+            return true
         }
 
-        if (shouldUseWoodBox) {
-            Equipment.emptyWoodBox(this)
+        if (!Bank.isOpen()) {
+            setStatus("Opening bank")
+            if (openBankIfNeeded()) {
+                return true
+            }
+            logger.warn("Failed to open bank at location='{}'; retrying", location)
+            return true
         }
 
-        logger.info("Depositing logs")
-        Bank.depositAll(this, LOGS_PATTERN)
-        awaitTicks(1)
-        return true
+        if (shouldUseWoodBox && Equipment.emptyWoodBox(this)) {
+            setStatus("Emptying wood box")
+            return true
+        }
+
+        if (shouldUseWoodBox && !Equipment.hasWoodBox()) {
+            setStatus("Retrieving wood box")
+            val withdrew = runCatching { Equipment.ensureWoodBox(this) }
+                .onFailure { logger.error("Failed to retrieve wood box during banking", it) }
+                .getOrDefault(false)
+            if (withdrew) {
+                awaitTicks(1)
+                return true
+            }
+            if (!Equipment.hasWoodBox()) {
+                logger.warn("Unable to retrieve wood box during banking; continuing without box")
+            }
+        }
+
+        if (Backpack.contains(LOGS_PATTERN)) {
+            logger.info("Depositing logs")
+            Bank.depositAll(this, LOGS_PATTERN)
+            awaitTicks(1)
+            return true
+        }
+
+        if (Backpack.isFull()) {
+            logger.warn("Backpack still full after deposit attempt; retrying")
+            return true
+        }
+
+        transitionPhase(Phase.CHOPPING, "Phase: BANKING -> CHOPPING")
+        setStatus("Ready to chop $targetTree")
+        return false
     }
 
     private suspend fun handleChoppingPhase(): Boolean {
         if (Backpack.isFull()) {
+            setStatus("Backpack full")
             return handleFullBackpack()
         }
 
-        status = "Locating nearest $targetTree"
+        setStatus("Locating nearest $targetTree")
         awaitIdle()
 
-        if (Coordinates.isPlayerWithinRadius(effectiveChopCoordinate(), CHOP_SEARCH_RADIUS)) return true
+        val treeType = TreeTypes.resolve(targetTree)
+        val started = runCatching {
+            val chopRequest = treeType?.let { this.skilling.woodcutting.chop(it) }
+                ?: this.skilling.woodcutting.chop(targetTree)
+            chopRequest.nearest()
+        }.onFailure { logger.error("Failed to initiate chopping for '{}'", targetTree, it) }
+            .getOrDefault(false)
 
-        if (Woodcutting.chop(this, targetTree)) {
-            status = "Chopping $targetTree"
+        if (started) {
+            setStatus("Chopping $targetTree")
             logger.info("Chop target: '{}'", targetTree)
             return true
         }
 
-        status = "No $targetTree nearby"
+        setStatus("No $targetTree nearby")
         logger.debug("No target '{}' nearby", targetTree)
         return false
     }
@@ -231,13 +360,16 @@ class UberChop : SuspendableScript() {
                 return true
             }
         }
+        setStatus("Banking logs")
         transitionPhase(Phase.BANKING, "Phase: CHOPPING -> BANKING")
         return true
     }
 
     private suspend fun openBankIfNeeded(): Boolean {
         if (Bank.isOpen()) return false
-        val opened = Bank.open(this)
+        val opened = runCatching { Bank.open(this) }
+            .onFailure { logger.error("Bank.open() threw", it) }
+            .getOrDefault(false)
         logger.info("Bank.open() -> {}", opened)
         if (opened) {
             awaitTicks(1)
@@ -245,8 +377,8 @@ class UberChop : SuspendableScript() {
         return opened
     }
 
-
     private fun refreshDerivedPreferences() {
+
         val names = TreeTypes.ALL
         val treeIndex = settings.savedTreeType.coerceIn(0, names.lastIndex)
         targetTree = names[treeIndex]
@@ -258,23 +390,56 @@ class UberChop : SuspendableScript() {
 
         location = resolved?.name.orEmpty()
         settings.savedLocation = location
+        invalidateLocationSnapshot()
     }
 
     // Location helpers
-    private fun selectedLocation(): TreeLocation? = treeLocations.firstOrNull { it.name == location }
+    private fun currentLocationSnapshot(): LocationSnapshot {
+        val activeLocation = location
+        val custom = settings.customLocations[activeLocation]
+        val cached = cachedLocationSnapshot
 
-    private fun effectiveChopCoordinate(): Coordinate? =
-        resolveCustomCoordinate { toCoordinate(it.chopX, it.chopY, it.chopZ) } ?: selectedLocation()?.chop
+        if (cached != null && cached.locationName == activeLocation) {
+            val cachedCustom = cached.custom
+            val customMatches = when {
+                cachedCustom == null && custom == null -> true
+                cachedCustom != null && custom != null ->
+                    cachedCustom.chopX == custom.chopX &&
+                    cachedCustom.chopY == custom.chopY &&
+                    cachedCustom.chopZ == custom.chopZ &&
+                    cachedCustom.bankX == custom.bankX &&
+                    cachedCustom.bankY == custom.bankY &&
+                    cachedCustom.bankZ == custom.bankZ
+                else -> false
+            }
+            if (customMatches) {
+                return cached
+            }
+        }
 
-    private fun effectiveBankCoordinate(): Coordinate? =
-        resolveCustomCoordinate { toCoordinate(it.bankX, it.bankY, it.bankZ) } ?: selectedLocation()?.bank
+        val customSnapshot = custom?.let {
+            CustomLocationSnapshot(it.chopX, it.chopY, it.chopZ, it.bankX, it.bankY, it.bankZ)
+        }
+        val selected = treeLocations.firstOrNull { it.name == activeLocation }
+        val chop = customSnapshot?.let { toCoordinate(it.chopX, it.chopY, it.chopZ) } ?: selected?.chop
+        val bank = customSnapshot?.let { toCoordinate(it.bankX, it.bankY, it.bankZ) } ?: selected?.bank
 
-    private fun resolveCustomCoordinate(extractor: (CustomLocation) -> Coordinate?): Coordinate? {
-        val custom = settings.customLocations[location] ?: return null
-        return extractor(custom)
+        return LocationSnapshot(activeLocation, customSnapshot, selected, chop, bank).also {
+            cachedLocationSnapshot = it
+        }
     }
+
+    private fun selectedLocation(): TreeLocation? = currentLocationSnapshot().selected
+
+    private fun effectiveChopCoordinate(): Coordinate? = currentLocationSnapshot().chop
+
+    private fun effectiveBankCoordinate(): Coordinate? = currentLocationSnapshot().bank
 
     private fun toCoordinate(x: Int?, y: Int?, z: Int?): Coordinate? =
         if (x != null && y != null && z != null) Coordinate(x, y, z) else null
 }
+
+
+
+
 
