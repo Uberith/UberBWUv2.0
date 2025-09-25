@@ -10,7 +10,7 @@ import java.io.ByteArrayOutputStream
 import javax.imageio.ImageIO
 import com.uberith.api.ui.ColorManager
 import com.uberith.api.ui.CustomImages
-import net.botwithus.kxapi.game.skills.woodcutting.TreeType
+import net.botwithus.kxapi.game.skilling.impl.woodcutting.TreeType
 import net.botwithus.rs3.entities.LocalPlayer
 import net.botwithus.rs3.world.ClientState
 

@@ -1,6 +1,6 @@
 package com.uberith.uberchop
 
-import net.botwithus.kxapi.game.skills.woodcutting.Woodcutting
+import net.botwithus.kxapi.game.skilling.impl.woodcutting.Woodcutting
 
 
 data class Settings(

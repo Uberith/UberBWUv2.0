@@ -4,7 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.uberith.api.game.world.Coordinates
 import com.uberith.uberchop.gui.UberChopGUI
-import net.botwithus.kxapi.game.skills.woodcutting.Woodcutting
+import net.botwithus.kxapi.game.skilling.impl.woodcutting.Woodcutting
 import net.botwithus.kxapi.script.SuspendableScript
 import net.botwithus.rs3.stats.Stats
 import net.botwithus.rs3.world.Coordinate
