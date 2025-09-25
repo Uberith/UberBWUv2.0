@@ -31,6 +31,7 @@ class UberChop : SuspendableScript() {
         private val LOGS_PATTERN: Pattern = Pattern.compile(".*logs.*", Pattern.CASE_INSENSITIVE)
         private const val BANK_RADIUS = 10
         private const val CHOP_SEARCH_RADIUS = 40
+        private const val PREPARING_TIMEOUT_MS = 45_000L
     }
 
     var settings = Settings()
@@ -48,6 +49,7 @@ class UberChop : SuspendableScript() {
     private var lastRuntimeUpdateMs: Long = 0L
     @Volatile private var uiInitialized: Boolean = false
     @Volatile private var preppingDetailsLogged: Boolean = false
+    private var preparingStartedAt: Long = 0L
 
     private data class CustomLocationSnapshot(
         val chopX: Int?,
@@ -185,9 +187,13 @@ class UberChop : SuspendableScript() {
         if (phase != next) {
             logger.debug("Phase transition {} -> {}", phase, next)
         }
+        val previous = phase
         phase = next
         if (next == Phase.PREPARING) {
             preppingDetailsLogged = false
+            preparingStartedAt = System.currentTimeMillis()
+        } else if (previous == Phase.PREPARING) {
+            preparingStartedAt = 0L
         }
     }
 
@@ -196,6 +202,21 @@ class UberChop : SuspendableScript() {
             status = next
             logger.info("Status -> {}", next)
         }
+    }
+
+    private fun preparingWaitOrTimeout(reason: String): Boolean {
+        if (preparingStartedAt == 0L) {
+            preparingStartedAt = System.currentTimeMillis()
+        }
+        val elapsed = System.currentTimeMillis() - preparingStartedAt
+        if (elapsed >= PREPARING_TIMEOUT_MS) {
+            logger.error("Preparing timeout after {} ms: {}", elapsed, reason)
+            setStatus("Preparing timeout - continuing")
+            transitionPhase(Phase.CHOPPING, "Phase: PREPARING -> CHOPPING (timeout)")
+            return false
+        }
+        logger.debug("Preparing wait: {} (elapsed={} ms)", reason, elapsed)
+        return true
     }
 
     private suspend fun handlePreparingPhase(): Boolean {
@@ -237,16 +258,17 @@ class UberChop : SuspendableScript() {
             if (!Bank.isOpen()) {
                 openBankIfNeeded()
             }
-            return true
+            return preparingWaitOrTimeout("Awaiting arrival at bank for '$location'")
         }
 
         if (!Bank.isOpen()) {
             setStatus("Opening bank")
-            if (openBankIfNeeded()) {
-                return true
+            val opened = openBankIfNeeded()
+            if (opened) {
+                return preparingWaitOrTimeout("Opening bank at '$location'")
             }
             logger.warn("Bank failed to open near location='{}'; will retry", location)
-            return true
+            return preparingWaitOrTimeout("Opening bank at '$location' (retry)")
         }
 
         if (!Equipment.hasWoodBox()) {
@@ -269,11 +291,11 @@ class UberChop : SuspendableScript() {
     }
 
     private suspend fun handleBankingPhase(): Boolean {
-        val bankTarget = effectiveBankCoordinate()
         setStatus("Banking logs")
+        val bankTarget = effectiveBankCoordinate()
 
         if (bankTarget != null && !Coordinates.isPlayerWithinRadius(bankTarget, BANK_RADIUS)) {
-            setStatus("Returning to bank")
+            setStatus("Moving to bank")
             if (!Bank.isOpen()) {
                 openBankIfNeeded()
             }
@@ -282,7 +304,8 @@ class UberChop : SuspendableScript() {
 
         if (!Bank.isOpen()) {
             setStatus("Opening bank")
-            if (openBankIfNeeded()) {
+            val opened = openBankIfNeeded()
+            if (opened) {
                 return true
             }
             logger.warn("Failed to open bank at location='{}'; retrying", location)
@@ -438,8 +461,4 @@ class UberChop : SuspendableScript() {
     private fun toCoordinate(x: Int?, y: Int?, z: Int?): Coordinate? =
         if (x != null && y != null && z != null) Coordinate(x, y, z) else null
 }
-
-
-
-
 
