@@ -4,6 +4,8 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.uberith.api.game.world.Coordinates
 import com.uberith.uberchop.gui.UberChopGUI
+import net.botwithus.kxapi.game.skilling.impl.fletching.FletchingProduct
+import net.botwithus.kxapi.game.skilling.impl.fletching.fletching
 import net.botwithus.kxapi.game.skilling.impl.woodcutting.woodcutting
 import net.botwithus.kxapi.game.skilling.skilling
 import net.botwithus.kxapi.script.SuspendableScript
@@ -11,8 +13,8 @@ import net.botwithus.rs3.stats.Stats
 import net.botwithus.rs3.world.Coordinate
 import net.botwithus.scripts.Info
 import net.botwithus.ui.workspace.Workspace
-import net.botwithus.xapi.game.inventory.Backpack
-import net.botwithus.xapi.game.inventory.Bank
+import net.botwithus.kxapi.game.inventory.Backpack
+import net.botwithus.kxapi.game.inventory.Bank
 import net.botwithus.xapi.script.ui.interfaces.BuildableUI
 import kotlin.jvm.JvmName
 import org.slf4j.Logger
@@ -75,14 +77,27 @@ class UberChop : SuspendableScript() {
         val totalRuntimeMs: Long
     )
 
+    private enum class LogHandling {
+        BANK,
+        DROP,
+        FLETCH;
+
+        companion object {
+            fun from(index: Int): LogHandling = values().getOrElse(index) { BANK }
+        }
+    }
+
     @Volatile private var cachedLocationSnapshot: LocationSnapshot? = null
 
     private fun invalidateLocationSnapshot() {
         cachedLocationSnapshot = null
     }
 
+    private val logHandlingPreference: LogHandling
+        get() = LogHandling.from(settings.logHandlingMode)
+
     private val shouldUseWoodBox: Boolean
-        get() = settings.withdrawWoodBox
+        get() = settings.withdrawWoodBox && logHandlingPreference == LogHandling.BANK
 
     private val gui by lazy { UberChopGUI(this) }
 
@@ -405,20 +420,127 @@ class UberChop : SuspendableScript() {
     }
 
     private suspend fun handleFullBackpack(): Boolean {
-        if (shouldUseWoodBox && Equipment.fillWoodBox(this)) {
+        val handling = logHandlingPreference
+
+        if (handling == LogHandling.BANK && Backpack.contains(LOGS_PATTERN) && Equipment.hasWoodBox()) {
+            setStatus("Filling wood box")
+            val filled = Equipment.fillWoodBox(this)
+            if (filled) {
+                if (!Backpack.isFull()) {
+                    resetLogTracking()
+                    logger.debug("Filled wood box; continuing chopping phase")
+                    return true
+                }
+                logger.debug("Filled wood box but backpack remains full; continuing handling")
+            } else {
+                logger.debug("Attempted to fill wood box but interaction failed; proceeding with {} handling", handling)
+            }
+        }
+
+        return when (handling) {
+            LogHandling.BANK -> {
+                setStatus("Banking logs")
+                transitionPhase(Phase.BANKING, "Phase: CHOPPING -> BANKING")
+                true
+            }
+            LogHandling.DROP -> {
+                setStatus("Dropping logs")
+                if (dropLogsFromBackpack()) {
+                    logger.debug("Dropped logs to clear backpack space")
+                    resetLogTracking()
+                    true
+                } else {
+                    logger.warn("Dropping logs failed; defaulting to banking")
+                    setStatus("Banking logs")
+                    transitionPhase(Phase.BANKING, "Phase: CHOPPING -> BANKING (drop fallback)")
+                    true
+                }
+            }
+            LogHandling.FLETCH -> {
+                if (tryFletchArrowShafts()) {
+                    resetLogTracking()
+                    true
+                } else {
+                    logger.warn("Fletching logs failed; defaulting to banking")
+                    setStatus("Banking logs")
+                    transitionPhase(Phase.BANKING, "Phase: CHOPPING -> BANKING (fletch fallback)")
+                    true
+                }
+            }
+        }
+    }
+
+    private suspend fun dropLogsFromBackpack(): Boolean {
+        val logItems = Backpack.getItems().filter { item -> LOGS_PATTERN.matcher(item.name).matches() }
+        if (logItems.isEmpty()) {
+            logger.debug("Drop requested but no logs detected in backpack")
+            return false
+        }
+
+        var droppedAny = false
+        for (item in logItems) {
+            val dropped = runCatching { Backpack.interact(item, "Drop") }
+                .onFailure { logger.error("Failed to drop '{}' from backpack", item.name, it) }
+                .getOrDefault(false)
+            if (dropped) {
+                droppedAny = true
+                awaitTicks(1)
+            }
+        }
+
+        if (!droppedAny) {
+            return false
+        }
+
+        repeat(5) {
             if (!Backpack.isFull()) {
-                logger.debug("Filled wood box; continuing chopping phase")
+                return true
+            }
+            awaitTicks(1)
+        }
+        return !Backpack.isFull()
+    }
+
+    private suspend fun tryFletchArrowShafts(): Boolean {
+        val logCountBefore = currentBackpackLogCount()
+        if (logCountBefore == 0) {
+            logger.debug("Fletching requested but no logs detected in backpack")
+            return false
+        }
+
+        val fletching = this.skilling.fletching
+        if (!fletching.canProduce(FletchingProduct.ARROW_SHAFTS)) {
+            logger.warn("Unable to fletch arrow shafts with current inventory; missing materials")
+            return false
+        }
+
+        setStatus("Fletching arrow shafts")
+        val started = runCatching {
+            fletching.produce(FletchingProduct.ARROW_SHAFTS).produceItem()
+            true
+        }.onFailure { logger.error("Failed to start arrow shaft fletching", it) }
+            .getOrDefault(false)
+
+        if (!started) {
+            return false
+        }
+
+        repeat(30) {
+            awaitTicks(1)
+            val currentLogs = currentBackpackLogCount()
+            if (!Backpack.isFull() || currentLogs < logCountBefore) {
+                logger.debug("Arrow shaft fletching freed backpack space")
                 return true
             }
         }
-        setStatus("Banking logs")
-        transitionPhase(Phase.BANKING, "Phase: CHOPPING -> BANKING")
-        return true
+
+        logger.warn("Arrow shaft fletching did not relieve backpack space")
+        return false
     }
 
     private suspend fun openBankIfNeeded(): Boolean {
         if (Bank.isOpen()) return false
-        val opened = runCatching { Bank.open() }
+        val opened = runCatching { Bank.open(this@UberChop) }
             .onFailure { logger.error("Bank.open() threw", it) }
             .getOrDefault(false)
         logger.info("Bank.open() -> {}", opened)
