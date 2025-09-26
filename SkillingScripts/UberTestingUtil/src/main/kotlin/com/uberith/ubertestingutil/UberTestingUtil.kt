@@ -222,7 +222,7 @@ class UberTestingUtil : SuspendableScript() {
     }
 
     fun isLodestoneUnlocked(type: LodestoneType): Boolean = try {
-        type.isAvailable()
+        type.isAvailable
     } catch (t: Throwable) {
         log.debug("Failed to evaluate availability for lodestone {}: {}", type.name, t.message)
         false
@@ -366,4 +366,5 @@ class UberTestingUtil : SuspendableScript() {
         private const val PICKUP_ACTION = "Take"
     }
 }
+
 
