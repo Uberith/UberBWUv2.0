@@ -68,7 +68,6 @@ include(":SkillingScripts")
 // Individual scripts
 include(":SkillingScripts:UberChop")
 
-include("SkillingScripts:UberTestingUtil")
-include("SkillingScripts:UberChop:UberTestingUtil")
-include("SkillingScripts:UberTestingUtil")
-include(":SkillingScripts:SuspendableDemo")
+include(":InternalUtils")
+include(":InternalUtils:UberTestingUtil")
+include(":InternalUtils:SuspendableDemo")

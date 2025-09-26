@@ -6,7 +6,7 @@ plugins {
     kotlin("jvm")
 }
 
-group = "com.uberith.skillingscripts.ubertestingutil"
+group = "com.uberith.internalutils.ubertestingutil"
 version = "1.0.0-SNAPSHOT"
 
 dependencies {

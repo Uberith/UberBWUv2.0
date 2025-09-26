@@ -6,7 +6,7 @@ plugins {
     kotlin("jvm")
 }
 
-group = "com.uberith.skillingscripts.suspendabledemo"
+group = "com.uberith.internalutils.suspendabledemo"
 version = "1.0.0-SNAPSHOT"
 
 dependencies {
