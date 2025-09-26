@@ -21,6 +21,11 @@ import java.util.Locale
 )
 class UberTestingUtil : SuspendableScript() {
 
+    enum class TestingOption {
+        NONE,
+        GROUND_ITEMS
+    }
+
     private val log = LoggerFactory.getLogger(UberTestingUtil::class.java)
     @Volatile private var status: String = "Idle"
     @Volatile private var lastSummary: String? = null
@@ -39,6 +44,7 @@ class UberTestingUtil : SuspendableScript() {
     @Volatile private var lodestoneTeleportRequest: LodestoneType? = null
     @Volatile private var lastLodestoneMessage: String? = null
     @Volatile private var lastLodestoneAt: Long = 0L
+    @Volatile private var testingOption: TestingOption = TestingOption.NONE
 
     private val queryTester = GroundItemQueryTester()
     private val gui by lazy { UberTestingUtilGUI(this) }
@@ -55,22 +61,18 @@ class UberTestingUtil : SuspendableScript() {
     }
 
     override fun onActivation() {
-        status = "Activating"
-        log.info("UberTestingUtil activated. Beginning ground item scan.")
+        status = "Awaiting selection"
+        testingOption = TestingOption.NONE
+        clearGroundItemResults()
+        log.info("UberTestingUtil activated. Awaiting testing selection.")
     }
 
     override fun onDeactivation() {
         status = "Inactive"
         log.info("UberTestingUtil deactivated.")
-        lastSummary = null
-        latestSnapshots = emptyList()
-        latestDiagnostics = emptyList()
-        lastDiagnosticsCheckAt = 0L
-        lastDiagnosticsFailureSignature = null
+        testingOption = TestingOption.NONE
+        clearGroundItemResults()
         diagnosticsHeightBufferPx = 0
-        pickupRequested = false
-        lastPickupMessage = null
-        lastPickupAt = 0L
         selectedLodestone = LodestoneType.BURTHORPE
         lodestoneTeleportRequest = null
         lastLodestoneMessage = null
@@ -79,6 +81,14 @@ class UberTestingUtil : SuspendableScript() {
 
     override suspend fun onLoop() {
         processLodestoneTeleportRequest()
+
+        if (testingOption != TestingOption.GROUND_ITEMS) {
+            if (testingOption == TestingOption.NONE) {
+                status = "Awaiting selection"
+            }
+            awaitTicks(5)
+            return
+        }
 
         val scanMinStack = minStackSizeValue
         val scanMaxDistance = maxDistanceTiles
@@ -155,6 +165,28 @@ class UberTestingUtil : SuspendableScript() {
     }
 
     fun latestStacks(): List<GroundItemSnapshot> = latestSnapshots
+
+    fun currentTestingOption(): TestingOption = testingOption
+
+    fun selectTestingOption(option: TestingOption) {
+        if (testingOption == option) {
+            return
+        }
+
+        testingOption = option
+        when (option) {
+            TestingOption.NONE -> {
+                clearGroundItemResults()
+                status = "Awaiting selection"
+                log.info("Testing option cleared; awaiting selection.")
+            }
+            TestingOption.GROUND_ITEMS -> {
+                clearGroundItemResults()
+                status = "Preparing ground item scan"
+                log.info("Ground item testing option selected.")
+            }
+        }
+    }
 
     fun lastScanAgeMs(): Long = if (lastScanAt == 0L) -1 else System.currentTimeMillis() - lastScanAt
 
@@ -284,6 +316,18 @@ class UberTestingUtil : SuspendableScript() {
     ) {
         val displayLabel: String
             get() = if (quantity > 1) "$name x$quantity" else name
+    }
+
+    private fun clearGroundItemResults() {
+        lastSummary = null
+        lastScanAt = 0L
+        latestSnapshots = emptyList()
+        latestDiagnostics = emptyList()
+        lastDiagnosticsCheckAt = 0L
+        lastDiagnosticsFailureSignature = null
+        pickupRequested = false
+        lastPickupMessage = null
+        lastPickupAt = 0L
     }
 
     private suspend fun processLodestoneTeleportRequest() {
