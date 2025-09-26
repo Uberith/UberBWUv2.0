@@ -37,7 +37,8 @@ class UberChop : SuspendableScript() {
     var settings = Settings()
     var targetTree: String = "Tree"
     var location: String = ""
-    var logsChopped: Int = 0
+    @Volatile var logsChopped: Int = 0
+        private set
     @get:JvmName("getStatusText")
     var status: String = "Idle"
         private set
@@ -45,8 +46,9 @@ class UberChop : SuspendableScript() {
     var WCLevel = Stats.WOODCUTTING.currentLevel
     private val gson = Gson()
     private val logger: Logger = LoggerFactory.getLogger(this::class.java)
-    private var totalRuntimeMs: Long = 0L
-    private var lastRuntimeUpdateMs: Long = 0L
+    @Volatile private var totalRuntimeMs: Long = 0L
+    @Volatile private var lastRuntimeUpdateMs: Long = 0L
+    private var lastKnownLogCount: Int = 0
     @Volatile private var uiInitialized: Boolean = false
     @Volatile private var preppingDetailsLogged: Boolean = false
     private var preparingStartedAt: Long = 0L
@@ -66,6 +68,11 @@ class UberChop : SuspendableScript() {
         val selected: TreeLocation?,
         val chop: Coordinate?,
         val bank: Coordinate?
+    )
+
+    private data class RuntimeSnapshot(
+        val logsChopped: Int,
+        val totalRuntimeMs: Long
     )
 
     @Volatile private var cachedLocationSnapshot: LocationSnapshot? = null
@@ -96,12 +103,15 @@ class UberChop : SuspendableScript() {
         logger.info("Activated: tree='{}', location='{}' (locations={})", targetTree, location, treeLocations.size)
         setStatus("Active - Preparing")
         transitionPhase(Phase.PREPARING, "Phase: READY -> PREPARING (activation)")
+        logsChopped = 0
         totalRuntimeMs = 0L
         lastRuntimeUpdateMs = System.currentTimeMillis()
+        resetLogTracking()
     }
 
     override fun onDeactivation() {
         super.onDeactivation()
+        updateRuntimeSnapshot()
         performSavePersistentData()
         setStatus("Inactive")
         phase = Phase.READY
@@ -128,11 +138,17 @@ class UberChop : SuspendableScript() {
 
     override fun saveData(data: JsonObject) {
         data.add("settings", gson.toJsonTree(settings).asJsonObject)
+        data.add("runtime", gson.toJsonTree(RuntimeSnapshot(logsChopped, totalRuntimeMs)).asJsonObject)
     }
 
     override fun loadData(data: JsonObject) {
         data.getAsJsonObject("settings")?.let { obj ->
             settings = gson.fromJson(obj, Settings::class.java)
+        }
+        data.getAsJsonObject("runtime")?.let { obj ->
+            val snapshot = gson.fromJson(obj, RuntimeSnapshot::class.java)
+            logsChopped = snapshot.logsChopped.coerceAtLeast(0)
+            totalRuntimeMs = snapshot.totalRuntimeMs.coerceAtLeast(0L)
         }
         refreshDerivedPreferences()
     }
@@ -173,12 +189,32 @@ class UberChop : SuspendableScript() {
     }
 
     private fun updateRuntimeSnapshot() {
+        updateLogTracking()
         val now = System.currentTimeMillis()
         if (lastRuntimeUpdateMs != 0L) {
             totalRuntimeMs += now - lastRuntimeUpdateMs
         }
         lastRuntimeUpdateMs = now
         WCLevel = Stats.WOODCUTTING.currentLevel
+    }
+
+    private fun updateLogTracking() {
+        val currentLogCount = currentBackpackLogCount()
+        val gained = currentLogCount - lastKnownLogCount
+        if (gained > 0) {
+            logsChopped += gained
+        }
+        lastKnownLogCount = currentLogCount
+    }
+
+    private fun currentBackpackLogCount(): Int = runCatching {
+        Backpack.getItems().sumOf { item ->
+            if (LOGS_PATTERN.matcher(item.name).matches()) item.quantity else 0
+        }
+    }.getOrDefault(0)
+
+    private fun resetLogTracking() {
+        lastKnownLogCount = currentBackpackLogCount()
     }
 
     // Phase management
@@ -204,6 +240,11 @@ class UberChop : SuspendableScript() {
             return true
         }
         return false
+    }
+
+    private fun readyToChop(reason: String) {
+        transitionPhase(Phase.CHOPPING, reason)
+        setStatus("Ready to chop $targetTree")
     }
 
     private fun preparingWaitOrTimeout(reason: String): Boolean {
@@ -242,8 +283,7 @@ class UberChop : SuspendableScript() {
         val bankTarget = effectiveBankCoordinate()
 
         if (!shouldUseWoodBox) {
-            setStatus("Ready to chop $targetTree")
-            transitionPhase(Phase.CHOPPING, "Phase: PREPARING -> CHOPPING (wood box disabled)")
+            readyToChop("Phase: PREPARING -> CHOPPING (wood box disabled)")
             return false
         }
 
@@ -251,7 +291,7 @@ class UberChop : SuspendableScript() {
 
         if (bankTarget == null) {
             logger.warn("Wood box enabled but no bank coordinate for location='{}'; continuing without banking prep", location)
-            transitionPhase(Phase.CHOPPING, "Phase: PREPARING -> CHOPPING (no bank target)")
+            readyToChop("Phase: PREPARING -> CHOPPING (no bank target)")
             return false
         }
 
@@ -273,22 +313,15 @@ class UberChop : SuspendableScript() {
             return preparingWaitOrTimeout("Opening bank at '$location' (retry)")
         }
 
-        if (!Equipment.hasWoodBox()) {
-            setStatus("Withdrawing wood box")
-            val withdrew = runCatching { Equipment.ensureWoodBox(this) }
-                .onFailure { logger.error("Failed to withdraw wood box", it) }
-                .getOrDefault(false)
-            if (withdrew) {
-                awaitTicks(1)
-                return true
-            }
-            if (!Equipment.hasWoodBox()) {
-                logger.warn("No wood box retrieved; proceeding without to avoid stalling")
-            }
+        if (ensureWoodBoxInBackpack(
+                statusMessage = "Withdrawing wood box",
+                warnMessage = "No wood box retrieved; proceeding without to avoid stalling",
+                errorMessage = "Failed to withdraw wood box"
+        )) {
+            return true
         }
 
-        transitionPhase(Phase.CHOPPING, "Phase: PREPARING -> CHOPPING")
-        setStatus("Ready to chop $targetTree")
+        readyToChop("Phase: PREPARING -> CHOPPING")
         return false
     }
 
@@ -319,18 +352,12 @@ class UberChop : SuspendableScript() {
             return true
         }
 
-        if (shouldUseWoodBox && !Equipment.hasWoodBox()) {
-            setStatus("Retrieving wood box")
-            val withdrew = runCatching { Equipment.ensureWoodBox(this) }
-                .onFailure { logger.error("Failed to retrieve wood box during banking", it) }
-                .getOrDefault(false)
-            if (withdrew) {
-                awaitTicks(1)
-                return true
-            }
-            if (!Equipment.hasWoodBox()) {
-                logger.warn("Unable to retrieve wood box during banking; continuing without box")
-            }
+        if (shouldUseWoodBox && ensureWoodBoxInBackpack(
+                statusMessage = "Retrieving wood box",
+                warnMessage = "Unable to retrieve wood box during banking; continuing without box",
+                errorMessage = "Failed to retrieve wood box during banking"
+        )) {
+            return true
         }
 
         if (Backpack.contains(LOGS_PATTERN)) {
@@ -345,8 +372,7 @@ class UberChop : SuspendableScript() {
             return true
         }
 
-        transitionPhase(Phase.CHOPPING, "Phase: BANKING -> CHOPPING")
-        setStatus("Ready to chop $targetTree")
+        readyToChop("Phase: BANKING -> CHOPPING")
         return false
     }
 
@@ -400,6 +426,28 @@ class UberChop : SuspendableScript() {
             awaitTicks(1)
         }
         return opened
+    }
+
+    private suspend fun ensureWoodBoxInBackpack(
+        statusMessage: String,
+        warnMessage: String,
+        errorMessage: String
+    ): Boolean {
+        if (Equipment.hasWoodBox()) {
+            return false
+        }
+        setStatus(statusMessage)
+        val retrieved = runCatching { Equipment.ensureWoodBox(this) }
+            .onFailure { logger.error(errorMessage, it) }
+            .getOrDefault(false)
+        if (retrieved) {
+            awaitTicks(1)
+            return true
+        }
+        if (!Equipment.hasWoodBox()) {
+            logger.warn(warnMessage)
+        }
+        return false
     }
 
     private fun refreshDerivedPreferences() {
