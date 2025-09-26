@@ -2,6 +2,7 @@ package com.uberith.ubertestingutil
 
 import com.uberith.ubertestingutil.UberTestingUtil.TestingOption
 import net.botwithus.imgui.ImGui
+import net.botwithus.kxapi.game.traversal.LodestoneNetwork
 import net.botwithus.ui.workspace.Workspace
 import net.botwithus.xapi.game.traversal.enums.LodestoneType
 import net.botwithus.xapi.script.ui.interfaces.BuildableUI
@@ -152,12 +153,13 @@ class UberTestingUtilGUI(private val script: UberTestingUtil) : BuildableUI {
         val lodestones = LodestoneType.values()
         val selected = script.selectedLodestone()
         val preview = script.formatLodestoneName(selected)
+        val lodestoneNet = LodestoneNetwork
 
         if (ImGui.beginCombo("Destination", preview, 0)) {
             for (lodestone in lodestones) {
                 val label = buildString {
                     append(script.formatLodestoneName(lodestone))
-                    if (!script.isLodestoneUnlocked(lodestone)) {
+                    if (!script.isLodestoneUnlocked(lodestoneNet, lodestone)) {
                         append(" (Locked)")
                     }
                 }
@@ -176,7 +178,7 @@ class UberTestingUtilGUI(private val script: UberTestingUtil) : BuildableUI {
 
         val networkStatus = if (script.lodestoneNetworkOpen()) "Open" else "Closed"
         ImGui.text("Network interface: $networkStatus")
-        val availability = if (script.isLodestoneUnlocked(selected)) "Unlocked" else "Locked"
+        val availability = if (script.isLodestoneUnlocked(lodestoneNet,selected)) "Unlocked" else "Locked"
         ImGui.text("Selected lodestone: $availability")
 
         if (ImGui.button("Teleport via Lodestone", TELEPORT_BUTTON_WIDTH, 0f)) {
