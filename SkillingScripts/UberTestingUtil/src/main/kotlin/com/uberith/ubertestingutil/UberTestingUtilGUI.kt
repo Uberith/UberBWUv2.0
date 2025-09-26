@@ -1,5 +1,6 @@
 package com.uberith.ubertestingutil
 
+import com.uberith.ubertestingutil.UberTestingUtil.TestingOption
 import net.botwithus.imgui.ImGui
 import net.botwithus.ui.workspace.Workspace
 import net.botwithus.xapi.game.traversal.enums.LodestoneType
@@ -46,6 +47,8 @@ class UberTestingUtilGUI(private val script: UberTestingUtil) : BuildableUI {
     }
 
     private fun renderGroundItemsTab(diagnostics: List<GroundItemQueryTester.TestResult>) {
+        renderTestingOptionControls()
+        ImGui.separator()
         renderStatusSection()
         ImGui.separator()
         renderFilterSection()
@@ -53,6 +56,24 @@ class UberTestingUtilGUI(private val script: UberTestingUtil) : BuildableUI {
         renderStacksSection()
         ImGui.separator()
         renderDiagnosticsSection(diagnostics)
+    }
+
+    private fun renderTestingOptionControls() {
+        val option = script.currentTestingOption()
+        val isActive = option == TestingOption.GROUND_ITEMS
+        val buttonLabel = if (isActive) "Stop Ground Item Testing" else "Start Ground Item Testing"
+        if (ImGui.button(buttonLabel, ACTIVATION_BUTTON_WIDTH, 0f)) {
+            val nextOption = if (isActive) TestingOption.NONE else TestingOption.GROUND_ITEMS
+            script.selectTestingOption(nextOption)
+        }
+        val optionLabel = when (option) {
+            TestingOption.NONE -> "Current option: None selected"
+            TestingOption.GROUND_ITEMS -> "Current option: Ground Items"
+        }
+        ImGui.text(optionLabel)
+        if (!isActive) {
+            ImGui.text("Select an option to begin testing.")
+        }
     }
 
     private fun renderStatusSection() {
@@ -209,6 +230,7 @@ class UberTestingUtilGUI(private val script: UberTestingUtil) : BuildableUI {
         private const val MIN_WINDOW_HEIGHT = 360f
         private const val BASE_WINDOW_HEIGHT = 260f
         private const val DIAGNOSTIC_LINE_HEIGHT = 18f
+        private const val ACTIVATION_BUTTON_WIDTH = 260f
         private const val PICKUP_BUTTON_WIDTH = 220f
         private const val TELEPORT_BUTTON_WIDTH = 240f
     }
