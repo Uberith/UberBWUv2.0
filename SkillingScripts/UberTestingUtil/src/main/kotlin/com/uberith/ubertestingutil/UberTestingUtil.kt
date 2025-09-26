@@ -1,12 +1,12 @@
 package com.uberith.ubertestingutil
 
+import net.botwithus.kxapi.game.traversal.teleportSuspend
 import net.botwithus.kxapi.script.SuspendableScript
 import net.botwithus.rs3.item.GroundItem
 import net.botwithus.rs3.world.Coordinate
 import net.botwithus.scripts.Info
 import net.botwithus.ui.workspace.Workspace
 import net.botwithus.xapi.game.traversal.LodestoneNetwork
-import net.botwithus.rs3.vars.VarDomain
 import net.botwithus.xapi.game.traversal.enums.LodestoneType
 import net.botwithus.xapi.query.GroundItemQuery
 import net.botwithus.xapi.script.ui.interfaces.BuildableUI
@@ -346,7 +346,7 @@ class UberTestingUtil : SuspendableScript() {
 
         status = "Teleporting to $destinationName"
         try {
-            val result = target.teleport(this)
+            val result = target.teleportSuspend(this)
             lastLodestoneMessage = if (result) {
                 log.info("Teleporting via lodestone to {}", destinationName)
                 "Teleport initiated to $destinationName."
@@ -368,5 +368,7 @@ class UberTestingUtil : SuspendableScript() {
         private const val PICKUP_ACTION = "Take"
     }
 }
+
+
 
 
