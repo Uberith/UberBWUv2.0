@@ -12,10 +12,8 @@ import net.botwithus.kxapi.script.SuspendableScript
 import net.botwithus.rs3.stats.Stats
 import net.botwithus.rs3.world.Coordinate
 import net.botwithus.scripts.Info
-import net.botwithus.ui.workspace.Workspace
 import net.botwithus.kxapi.game.inventory.Backpack
 import net.botwithus.kxapi.game.inventory.Bank
-import net.botwithus.xapi.script.ui.interfaces.BuildableUI
 import kotlin.jvm.JvmName
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -105,9 +103,9 @@ class UberChop : SuspendableScript() {
         get() = TreeLocations.ALL
 
     override fun getStatus(): String = status
-
     override fun onInitialize() {
         super.onInitialize()
+        configPanel(gui)
         try { gui.preload() } catch (_: Throwable) { }
         refreshDerivedPreferences()
     }
@@ -149,8 +147,6 @@ class UberChop : SuspendableScript() {
         }
     }
 
-    override suspend fun buildUI(): BuildableUI = gui
-
     override fun saveData(data: JsonObject) {
         data.add("settings", gson.toJsonTree(settings).asJsonObject)
         data.add("runtime", gson.toJsonTree(RuntimeSnapshot(logsChopped, totalRuntimeMs)).asJsonObject)
@@ -166,15 +162,6 @@ class UberChop : SuspendableScript() {
             totalRuntimeMs = snapshot.totalRuntimeMs.coerceAtLeast(0L)
         }
         refreshDerivedPreferences()
-    }
-
-    override suspend fun onDrawConfigSuspend(workspace: Workspace) {
-        gui.render(workspace)
-    }
-
-    override fun onDraw(workspace: Workspace) {
-        super.onDraw(workspace)
-        try { gui.render(workspace) } catch (_: Throwable) { }
     }
 
     fun ensureUiSettingsLoaded() {
@@ -633,4 +620,5 @@ class UberChop : SuspendableScript() {
     private fun toCoordinate(x: Int?, y: Int?, z: Int?): Coordinate? =
         if (x != null && y != null && z != null) Coordinate(x, y, z) else null
 }
+
 

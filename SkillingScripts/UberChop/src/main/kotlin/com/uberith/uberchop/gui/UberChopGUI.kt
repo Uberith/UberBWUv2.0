@@ -3,8 +3,7 @@ package com.uberith.uberchop.gui
 import com.uberith.uberchop.UberChop
 import com.uberith.uberchop.TreeLocations
 import net.botwithus.imgui.ImGui
-import net.botwithus.ui.workspace.Workspace
-import net.botwithus.xapi.script.ui.interfaces.BuildableUI
+import net.botwithus.kxapi.imgui.ImGuiUI
 import org.slf4j.LoggerFactory
 import java.io.ByteArrayOutputStream
 import javax.imageio.ImageIO
@@ -14,7 +13,7 @@ import net.botwithus.kxapi.game.skilling.impl.woodcutting.TreeType
 import net.botwithus.rs3.entities.LocalPlayer
 import net.botwithus.rs3.world.ClientState
 
-class UberChopGUI(private val script: UberChop) : BuildableUI {
+class UberChopGUI(private val script: UberChop) : ImGuiUI() {
     // 0 Overview, 1 Core, 2 Handlers, 3 WorldHop, 4 Advanced, 5 Statistics, 6 Support, 7 Debug
     private var selectedTab: Int = 0
     private val FIXED_W = 560f
@@ -56,14 +55,10 @@ class UberChopGUI(private val script: UberChop) : BuildableUI {
         return v
     }
 
-    fun render(workspace: Workspace) {
+    override fun build() = imguiUI {
         renderInternal()
     }
 
-    override fun buildUI() {
-        // BuildableUI entrypoint used by XAPI public UI systems
-        renderInternal()
-    }
 
     private fun renderInternal() {
         // Ensure persisted tree/location are reflected before any UI usage
