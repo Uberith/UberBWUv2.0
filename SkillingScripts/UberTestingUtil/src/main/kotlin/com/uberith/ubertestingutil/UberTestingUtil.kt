@@ -6,12 +6,14 @@ import net.botwithus.rs3.world.Coordinate
 import net.botwithus.scripts.Info
 import net.botwithus.ui.workspace.Workspace
 import net.botwithus.xapi.game.traversal.LodestoneNetwork
+import net.botwithus.rs3.vars.VarDomain
 import net.botwithus.xapi.game.traversal.enums.LodestoneType
 import net.botwithus.xapi.query.GroundItemQuery
 import net.botwithus.xapi.script.ui.interfaces.BuildableUI
 import org.slf4j.LoggerFactory
 import kotlin.jvm.Volatile
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 
 @Info(
     name = "UberTestingUtil",
@@ -222,7 +224,7 @@ class UberTestingUtil : SuspendableScript() {
     }
 
     fun isLodestoneUnlocked(type: LodestoneType): Boolean = try {
-        type.isAvailable
+        type.isAvailable()
     } catch (t: Throwable) {
         log.debug("Failed to evaluate availability for lodestone {}: {}", type.name, t.message)
         false
