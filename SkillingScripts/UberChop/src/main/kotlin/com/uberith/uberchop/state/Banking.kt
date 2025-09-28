@@ -69,7 +69,7 @@ class Banking(
                 "DepositLogs: bankOpen=${Bank.isOpen()} matches=${matchingItems.size} sample=[$sample]"
             )
 
-            val depositResult = runCatching { Bank.depositAll(bot, bot.logPattern) }
+            val depositResult = runCatching { Bank.depositAll(script, bot.logPattern) }
                 .onFailure { error -> bot.warn("DepositLogs: depositAll(pattern) threw ${error.message}") }
                 .getOrElse { false }
 

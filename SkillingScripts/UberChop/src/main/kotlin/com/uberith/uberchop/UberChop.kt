@@ -1,20 +1,13 @@
 package com.uberith.uberchop
 
-import com.uberith.api.game.world.Coordinates
-import com.uberith.api.script.PermissiveScript
+
 import com.uberith.uberchop.config.Settings
 import com.uberith.uberchop.config.TreeLocation
 import com.uberith.uberchop.config.TreeLocations
 import com.uberith.uberchop.config.TreeTypes
 import com.uberith.uberchop.gui.UberChopGUI
 import com.uberith.uberchop.state.BotState
-import com.uberith.uberchop.state.Banking
-import com.uberith.uberchop.state.Chopping
-import net.botwithus.kxapi.game.inventory.Backpack
-import net.botwithus.kxapi.game.inventory.Bank
-import net.botwithus.kxapi.game.skilling.impl.woodcutting.woodcutting
-import net.botwithus.kxapi.game.skilling.skilling
-import net.botwithus.kxapi.script.SuspendableScript
+import net.botwithus.kxapi.permissive.PermissiveScript
 import net.botwithus.rs3.stats.Stats
 import net.botwithus.rs3.world.Coordinate
 import net.botwithus.scripts.Info
@@ -31,7 +24,7 @@ import kotlin.math.roundToInt
     version = "0.2.0",
     author = "Uberith"
 )
-class UberChop : PermissiveScript(), SuspendableScript.StateMachine<BotState> {
+class UberChop : PermissiveScript<BotState>() {
 
     /**
      * Minimal woodcutting loop that hands control to two permissive states.
@@ -86,16 +79,6 @@ class UberChop : PermissiveScript(), SuspendableScript.StateMachine<BotState> {
     val currentStatus: String
         get() = statusText
 
-    override fun getStatus(): String = statusText
-
-    override val enableStateMachine: Boolean
-        get() = true
-
-    override val defaultState: BotState
-        get() = BotState.CHOPPING
-
-    override fun stateEnumClass(): Class<BotState> = BotState::class.java
-
     override fun getBuildableUI(): BuildableUI = gui
 
 
@@ -119,10 +102,18 @@ class UberChop : PermissiveScript(), SuspendableScript.StateMachine<BotState> {
         updateStatus("Ready to go")
     }
 
-    override suspend fun onLoop() {
-        ensureUiSettingsLoaded()
-        doRun()
-        awaitTicks(1)
+    override fun onPreTick(): Boolean {
+        if (!uiSettingsLoaded) {
+            ensureUiSettingsLoaded()
+        }
+        return super.onPreTick()
+    }
+
+    override fun init() {
+        BotState.entries.forEach { state ->
+            getStateInstance(state)
+        }
+        switchToState(mode)
     }
 
     fun updateStatus(text: String) {
