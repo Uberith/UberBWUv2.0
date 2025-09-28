@@ -3,6 +3,7 @@ package com.uberith.uberchop.state
 import com.uberith.uberchop.Equipment
 import com.uberith.api.game.world.Coordinates
 import com.uberith.uberchop.UberChop
+import net.botwithus.rs3.entities.LocalPlayer
 import net.botwithus.kxapi.game.inventory.Backpack
 import net.botwithus.kxapi.game.skilling.impl.woodcutting.woodcutting
 import net.botwithus.kxapi.game.skilling.skilling
@@ -33,8 +34,16 @@ class Chopping(
                 distance == null || distance <= 12.0
             }
         }) {
-            onSuccess(LeafName("StartChopping"))
+            onSuccess(BranchName("AlreadyChopping"))
             onFailure(LeafName("StepToTree"))
+        }
+
+        branch(BranchName("AlreadyChopping"), condition = {
+            val currentAnim = LocalPlayer.self()?.animationId ?: -1
+            currentAnim != -1 && bot.chopWorkedLastTick
+        }) {
+            onSuccess(LeafName("MaintainChopping"))
+            onFailure(LeafName("StartChopping"))
         }
 
         // Small placeholder move step; keep the UI updated while navigation logic is pending.
@@ -53,13 +62,16 @@ class Chopping(
             }
         }
 
+        leaf(LeafName("MaintainChopping")) {
+            val treeName = bot.targetTree.ifBlank { "Tree" }
+            bot.updateStatus("Chopping $treeName")
+            bot.chopWorkedLastTick = true
+        }
+
         // Swing at the tree again when we either just moved or a new action is needed.
         leaf(LeafName("StartChopping")) {
             val treeName = bot.targetTree.ifBlank { "Tree" }
-            if (bot.chopWorkedLastTick) {
-                bot.updateStatus("Chopping $treeName")
-                return@leaf
-            }
+            bot.chopWorkedLastTick = false
             bot.updateStatus("Chopping $treeName")
             val started = runCatching {
                 bot.skilling.woodcutting.chop(treeName).nearest()
@@ -67,6 +79,9 @@ class Chopping(
                 bot.warn("Could not start chopping $treeName: ${it.message}")
             }.getOrDefault(false)
             bot.chopWorkedLastTick = started
+            if (started) {
+                bot.delay(1)
+            }
         }
 
         // Hand control to the banking state when the inventory is capped.

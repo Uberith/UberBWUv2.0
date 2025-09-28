@@ -69,16 +69,25 @@ class Banking(
                 "DepositLogs: bankOpen=${Bank.isOpen()} matches=${matchingItems.size} sample=[$sample]"
             )
 
-            val depositResult = runCatching { Bank.depositAll(bot, bot.logPattern) }
+            var depositResult = runCatching { Bank.depositAll(bot, bot.logPattern) }
                 .onFailure { error -> bot.warn("DepositLogs: depositAll(pattern) threw ${error.message}") }
                 .getOrElse { false }
 
-            val stillContainsLogs = Backpack.contains(bot.logPattern)
+            var stillContainsLogs = Backpack.contains(bot.logPattern)
             bot.info(
                 "DepositLogs: depositAll(pattern) -> $depositResult; stillContains=$stillContainsLogs"
             )
-            if (!depositResult && stillContainsLogs) {
-                bot.warn("DepositLogs: backpack still has log-pattern items after deposit attempt")
+            if (stillContainsLogs) {
+                val fallbackWorked = bot.depositLogsFallback()
+                if (fallbackWorked) {
+                    bot.info("DepositLogs: fallback backpack interactions triggered")
+                    depositResult = true
+                    bot.delay(1)
+                }
+                stillContainsLogs = Backpack.contains(bot.logPattern)
+                if (stillContainsLogs) {
+                    bot.warn("DepositLogs: backpack still has log-pattern items after all deposit attempts")
+                }
             }
 
             bot.chopWorkedLastTick = false

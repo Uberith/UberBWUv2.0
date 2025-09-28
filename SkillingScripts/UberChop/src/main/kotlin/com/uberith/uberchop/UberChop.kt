@@ -10,6 +10,7 @@ import com.uberith.uberchop.gui.UberChopGUI
 import com.uberith.uberchop.state.Banking
 import com.uberith.uberchop.state.BotState
 import com.uberith.uberchop.state.Chopping
+import net.botwithus.kxapi.game.inventory.Backpack
 import net.botwithus.kxapi.permissive.PermissiveDSL
 import net.botwithus.kxapi.permissive.PermissiveScript
 import net.botwithus.rs3.stats.Stats
@@ -36,7 +37,7 @@ class UberChop : PermissiveScript<BotState>(debug = true) {
      * each leaf can read or update it without juggling extra helpers.
      */
 
-    private val log = LoggerFactory.getLogger(UberChop::class.java)
+    private val log = getLogger()
     private val gson = Gson()
     // Lazy regex for any item whose name contains "logs".
     internal val logPattern = Pattern.compile(".*logs.*", Pattern.CASE_INSENSITIVE)
@@ -206,6 +207,25 @@ class UberChop : PermissiveScript<BotState>(debug = true) {
     private fun instantiateState(state: BotState): PermissiveDSL<*>? = when (state) {
         BotState.CHOPPING -> Chopping(this)
         BotState.BANKING -> Banking(this)
+    }
+
+
+    internal fun depositLogsFallback(maxIterations: Int = 10): Boolean {
+        var depositedAny = false
+        repeat(maxIterations) {
+            val item = Backpack.getItems().firstOrNull { logPattern.matcher(it.name).matches() }
+                ?: return depositedAny
+            val interacted = Backpack.interact(item, "Deposit-All") ||
+                Backpack.interact(item, "Deposit") ||
+                Backpack.interact(item, "Deposit-1")
+            if (!interacted) {
+                log.warn("Fallback deposit failed for ${item.name} (${item.id})")
+                return depositedAny
+            }
+            depositedAny = true
+            delay(1)
+        }
+        return depositedAny
     }
 
     internal fun ensureWoodBoxInBackpack(
