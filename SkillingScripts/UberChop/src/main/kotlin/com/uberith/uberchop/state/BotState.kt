@@ -9,6 +9,7 @@ enum class BotState(
     override val classz: KClass<out PermissiveDSL<*>>
 ) : StateEnum {
     CHOPPING("Chopping", Chopping::class),
-    BANKING("Banking", Banking::class)
-}
+    BANKING("Banking", Banking::class);
 
+    override fun toString(): String = description
+}

@@ -1,12 +1,16 @@
 package com.uberith.uberchop
 
-
+import com.google.gson.Gson
+import com.google.gson.JsonObject
 import com.uberith.uberchop.config.Settings
 import com.uberith.uberchop.config.TreeLocation
 import com.uberith.uberchop.config.TreeLocations
 import com.uberith.uberchop.config.TreeTypes
 import com.uberith.uberchop.gui.UberChopGUI
+import com.uberith.uberchop.state.Banking
 import com.uberith.uberchop.state.BotState
+import com.uberith.uberchop.state.Chopping
+import net.botwithus.kxapi.permissive.PermissiveDSL
 import net.botwithus.kxapi.permissive.PermissiveScript
 import net.botwithus.rs3.stats.Stats
 import net.botwithus.rs3.world.Coordinate
@@ -24,7 +28,7 @@ import kotlin.math.roundToInt
     version = "0.2.0",
     author = "Uberith"
 )
-class UberChop : PermissiveScript<BotState>() {
+class UberChop : PermissiveScript<BotState>(debug = true) {
 
     /**
      * Minimal woodcutting loop that hands control to two permissive states.
@@ -33,6 +37,7 @@ class UberChop : PermissiveScript<BotState>() {
      */
 
     private val log = LoggerFactory.getLogger(UberChop::class.java)
+    private val gson = Gson()
     // Lazy regex for any item whose name contains "logs".
     internal val logPattern = Pattern.compile(".*logs.*", Pattern.CASE_INSENSITIVE)
     internal enum class LogHandling {
@@ -60,6 +65,8 @@ class UberChop : PermissiveScript<BotState>() {
     private var startTimeMs: Long = System.currentTimeMillis()
     private var uiSettingsLoaded = false
     internal var chopWorkedLastTick = false
+    private val stateInstances = mutableMapOf<BotState, PermissiveDSL<*>>()
+    private var statesInitialised = false
 
     var settings: Settings = Settings()
     var targetTree: String = "Tree"
@@ -81,7 +88,6 @@ class UberChop : PermissiveScript<BotState>() {
 
     override fun getBuildableUI(): BuildableUI = gui
 
-
     override fun onDrawConfig(workspace: Workspace?) {
         workspace?.let {
             runCatching { gui.render(it) }
@@ -94,12 +100,23 @@ class UberChop : PermissiveScript<BotState>() {
             .onFailure { log.warn("GUI render error", it) }
     }
 
+    override fun init() {
+        initializeStateMachine()
+    }
+
     override fun onInitialize() {
         super.onInitialize()
         startTimeMs = System.currentTimeMillis()
         runCatching { gui.preload() }
         ensureUiSettingsLoaded()
+        initializeStateMachine()
+        if (!statesInitialised) {
+            log.error("State machine failed to initialise; script cannot run")
+            updateStatus("Idle: missing states")
+            return
+        }
         updateStatus("Ready to go")
+        switchState(mode, "Initialised")
     }
 
     override fun onPreTick(): Boolean {
@@ -109,11 +126,23 @@ class UberChop : PermissiveScript<BotState>() {
         return super.onPreTick()
     }
 
-    override fun init() {
-        BotState.entries.forEach { state ->
-            getStateInstance(state)
+    override fun savePersistentData(container: JsonObject?) {
+        val target = container ?: return
+        target.add("settings", gson.toJsonTree(settings))
+        target.addProperty("targetTree", targetTree)
+        target.addProperty("location", location)
+    }
+
+    override fun loadPersistentData(container: JsonObject?) {
+        val source = container ?: return
+        source.getAsJsonObject("settings")?.let {
+            runCatching { gson.fromJson(it, Settings::class.java) }
+                .onSuccess { loaded -> settings = loaded }
+                .onFailure { error -> log.warn("Failed to deserialize settings", error) }
         }
-        switchToState(mode)
+        source.get("targetTree")?.asString?.let { targetTree = it }
+        source.get("location")?.asString?.let { location = it }
+        uiSettingsLoaded = false
     }
 
     fun updateStatus(text: String) {
@@ -122,15 +151,61 @@ class UberChop : PermissiveScript<BotState>() {
     }
 
     fun switchState(next: BotState, reason: String) {
-        // Centralised logging so both states keep the status text in sync.
-        val alreadyActive = mode == next || isStateActive(next)
-        mode = next
-        if (!alreadyActive) {
-            switchToState(next)
+        if (!statesInitialised) {
+            initializeStateMachine()
         }
+        if (!statesInitialised) {
+            log.error("Cannot switch state to {} because no states are registered", next.description)
+            updateStatus("${next.description}: unavailable")
+            return
+        }
+        val stateName = stateInstances[next]?.name ?: next.description
+        setCurrentState(stateName)
+        mode = next
         chopWorkedLastTick = false
         info("Now ${next.description.lowercase()}: $reason")
         updateStatus("${next.description}: $reason")
+    }
+
+    private fun initializeStateMachine() {
+        if (statesInitialised) {
+            return
+        }
+
+        stateInstances.clear()
+
+        BotState.entries.forEach { state ->
+            val instance = instantiateState(state)
+            if (instance != null) {
+                stateInstances[state] = instance
+            } else {
+                log.error("Failed to instantiate state {}", state.description)
+            }
+        }
+
+        if (stateInstances.size != BotState.entries.size) {
+            val missing = BotState.entries
+                .filterNot { stateInstances.containsKey(it) }
+                .joinToString(", ") { it.description }
+            log.error("Unable to build state machine; missing states: {}", missing)
+            stateInstances.clear()
+            statesInitialised = false
+            return
+        }
+
+        val orderedStates = stateInstances.entries
+            .sortedBy { it.key.ordinal }
+            .map { it.value }
+            .toTypedArray()
+
+        initStates(*orderedStates)
+        statesInitialised = true
+        setCurrentState(mode.description)
+    }
+
+    private fun instantiateState(state: BotState): PermissiveDSL<*>? = when (state) {
+        BotState.CHOPPING -> Chopping(this)
+        BotState.BANKING -> Banking(this)
     }
 
     internal fun ensureWoodBoxInBackpack(
@@ -222,7 +297,4 @@ class UberChop : PermissiveScript<BotState>() {
 
     private fun toCoordinate(x: Int?, y: Int?, z: Int?): Coordinate? =
         if (x != null && y != null && z != null) Coordinate(x, y, z) else null
-
 }
-
-

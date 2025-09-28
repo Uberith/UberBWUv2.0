@@ -1,12 +1,11 @@
 package com.uberith.uberchop
 
 import net.botwithus.kxapi.game.inventory.Bank
-import net.botwithus.kxapi.script.SuspendableScript
 import net.botwithus.rs3.item.InventoryItem
 import net.botwithus.kxapi.game.inventory.Backpack
 import org.slf4j.LoggerFactory
-import java.util.regex.Pattern
 import kotlinx.coroutines.runBlocking
+import java.util.regex.Pattern
 
 /**
  * Wood box helpers scoped to the UberChop script now that the shared API version was removed.
@@ -24,7 +23,7 @@ object Equipment {
         Backpack.getItems().firstOrNull { item -> pattern.matcher(item.name).matches() }
 
     fun ensureWoodBox(
-        script: SuspendableScript,
+        script: UberChop,
         pattern: Pattern = WOOD_BOX_PATTERN,
         withdraw: Boolean = true
     ): Boolean {
@@ -44,7 +43,7 @@ object Equipment {
     }
 
     fun fillWoodBox(
-        script: SuspendableScript,
+        script: UberChop,
         pattern: Pattern = WOOD_BOX_PATTERN,
         option: String = FILL_OPTION
     ): Boolean {
@@ -61,7 +60,7 @@ object Equipment {
     }
 
     fun emptyWoodBox(
-        script: SuspendableScript,
+        script: UberChop,
         pattern: Pattern = WOOD_BOX_PATTERN,
         option: String = "Empty - logs and bird's nests"
     ): Boolean {
@@ -74,9 +73,8 @@ object Equipment {
             logger.info("[Equipment] Bank must be open to empty the wood box")
             return false
         }
-        val emptied = runBlocking { Bank.emptyBox(script, box.name, option) }
-        logger.info("[Equipment] Bank.emptyBox(option='{}') -> {}", option, emptied)
-        return emptied
+        logger.warn("[Equipment] emptyWoodBox is not supported on PermissiveScript; skipping request")
+        return false
     }
 }
 

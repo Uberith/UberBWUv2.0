@@ -11,4 +11,3 @@ abstract class UberChopState(
     protected val bot: UberChop = script
 }
 
-
