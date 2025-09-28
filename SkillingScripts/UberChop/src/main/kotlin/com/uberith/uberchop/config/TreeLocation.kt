@@ -1,4 +1,4 @@
-package com.uberith.uberchop
+package com.uberith.uberchop.config
 
 import net.botwithus.kxapi.game.skilling.impl.woodcutting.TreeType
 import net.botwithus.rs3.world.Coordinate
@@ -12,3 +12,4 @@ data class TreeLocation(
     val chop: Coordinate? = null,
     val bank: Coordinate? = null
 )
+

@@ -1,7 +1,7 @@
 package com.uberith.uberchop.gui
 
 import com.uberith.uberchop.UberChop
-import com.uberith.uberchop.TreeLocations
+import com.uberith.uberchop.config.TreeLocations
 import net.botwithus.imgui.ImGui
 import net.botwithus.kxapi.imgui.ImGuiUI
 import org.slf4j.LoggerFactory
@@ -12,15 +12,21 @@ import com.uberith.api.ui.CustomImages
 import net.botwithus.kxapi.game.skilling.impl.woodcutting.TreeType
 import net.botwithus.rs3.entities.LocalPlayer
 import net.botwithus.rs3.world.ClientState
+import net.botwithus.ui.workspace.Workspace
+import net.botwithus.scripts.Info
 
 class UberChopGUI(private val script: UberChop) : ImGuiUI() {
-    // 0 Overview, 1 Core, 2 Handlers, 3 WorldHop, 4 Advanced, 5 Statistics, 6 Support, 7 Debug
+    // 0 Overview, 1 Core, 2 Handlers, 3 WorldHop, 4 Advanced, 5 Statistics, 6 Support
     private var selectedTab: Int = 0
     private val FIXED_W = 560f
     private val FIXED_H = 620f
     private val CONTENT_H = 455f
     // Target tree selection will use a true Combo box (dropdown)
-    private var minimized: Boolean = false
+
+    private val windowTitle by lazy {
+        val version = script.javaClass.getAnnotation(Info::class.java)?.version?.takeIf { it.isNotBlank() } ?: "?"
+        "UberChop Permissive Settings | $version"
+    }
 
     // UI state for manual coordinate entry on Overview (for "Anywhere")
     private var coordUiLocName: String = ""
@@ -41,6 +47,10 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
     fun preload() {
         // Prepare for load during first draw when the UI context is ready
         unloadTextures()
+    }
+
+    fun render(@Suppress("UNUSED_PARAMETER") workspace: Workspace) {
+        renderInternal()
     }
 
     private fun adjustInt(label: String, value: Int, min: Int, max: Int, step: Int = 1): Int {
@@ -64,38 +74,21 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
         // Ensure persisted tree/location are reflected before any UI usage
         script.ensureUiSettingsLoaded()
         // Fixed-size, small-screen friendly window (supports compact mode)
-        if (minimized) {
-            ImGui.setNextWindowSize(360f, 140f)
-        } else {
-            ImGui.setNextWindowSize(FIXED_W, FIXED_H)
-        }
+        ImGui.setNextWindowSize(FIXED_W, FIXED_H)
 
-        if (ImGui.begin("UberChop", 0)) {
+        if (ImGui.begin(windowTitle, 0)) {
             val cm = ColorManager()
             cm.pushColors()
             // Top logo + summary with minimize/expand toggle
             drawLogoBar()
-            ImGui.text("Runtime ${script.formattedRuntime()}  |  Logs ${script.logsChopped} (${script.logsPerHour()}/h)  |  Status ${script.status}")
+            ImGui.text("Runtime ${script.formattedRuntime()}  |  Logs ${script.logsChopped} (${script.logsPerHour()}/h)  |  Status ${script.currentStatus}")
             ImGui.sameLine(0f, 8f)
-            if (minimized) {
-                if (ImGui.button("Expand", 72f, 0f)) minimized = false
-            } else {
-                if (ImGui.button("Minimize", 86f, 0f)) minimized = true
-            }
             ImGui.separator()
-            if (minimized) {
-                val worldText = ClientState.GAME.id.toString()
-                val coordText = LocalPlayer.self().coordinate
-                ImGui.text("W: $worldText  |  XYZ: $coordText")
-                cm.popColors()
-                ImGui.end()
-                return
-            }
 
             // Left navigation (vertical buttons with icons + selection marker), Right content (scrollable)
             val navW = 120f
             if (ImGui.beginChild("LeftNav", navW, CONTENT_H, true, 0)) {
-                val navCount = 8
+                val navCount = 7
                 val fudge = 12f // extra safety to avoid scrollbar
                 val available = CONTENT_H - fudge
                 // No vertical spacing between buttons; compute height to fill column
@@ -109,9 +102,7 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
                 drawNavItem(3, "WorldHop", navW, cm, btnH, rightPad)
                 drawNavItem(4, "Advanced", navW, cm, btnH, rightPad)
                 drawNavItem(5, "Statistics", navW, cm, btnH, rightPad)
-                drawNavItem(6, "Support", navW, cm, btnH, rightPad)
-                drawNavItem(7, "Debug", navW, cm, btnH, rightPad)
-            }
+                drawNavItem(6, "Support", navW, cm, btnH, rightPad)            }
             ImGui.endChild()
 
             ImGui.sameLine(0f, 8f)
@@ -131,8 +122,7 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
                         3 -> drawWorldHop()
                         4 -> drawAdvanced()
                         5 -> drawStatistics()
-                        6 -> drawSupport()
-                        7 -> drawDebug()
+                        else -> drawSupport()
                     }
                 }
                 ImGui.endChild()
@@ -695,7 +685,7 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
         ImGui.separator()
         ImGui.text("Target Tree:")
         ImGui.sameLine(0f, 6f)
-        val allTrees = com.uberith.uberchop.TreeTypes.ALL
+        val allTrees = com.uberith.uberchop.config.TreeTypes.ALL
         val currentIdx = script.settings.savedTreeType.coerceIn(0, allTrees.size - 1)
         val currentName = allTrees[currentIdx]
         // Build (index, name, level?) triples
@@ -800,7 +790,7 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
             if (ImGui.button("Apply##chop", 70f, 0f)) {
                 parseXYZ(chopXYZText)?.let { (x, y, z) ->
                     val map = script.settings.customLocations
-                    val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
+                    val cur = map[curLoc] ?: com.uberith.uberchop.config.CustomLocation()
                     cur.chopX = x; cur.chopY = y; cur.chopZ = z
                     map[curLoc] = cur
                     script.onSettingsChanged()
@@ -818,7 +808,7 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
                     if (x != null && y != null && z != null) {
                         chopXYZText = "${x.toInt()},${y.toInt()},${z.toInt()}"
                         val map = script.settings.customLocations
-                        val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
+                        val cur = map[curLoc] ?: com.uberith.uberchop.config.CustomLocation()
                         cur.chopX = x.toInt(); cur.chopY = y.toInt(); cur.chopZ = z.toInt()
                         map[curLoc] = cur
                         script.onSettingsChanged()
@@ -839,7 +829,7 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
             if (ImGui.button("Apply##bank", 70f, 0f)) {
                 parseXYZ(bankXYZText)?.let { (x, y, z) ->
                     val map = script.settings.customLocations
-                    val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
+                    val cur = map[curLoc] ?: com.uberith.uberchop.config.CustomLocation()
                     cur.bankX = x; cur.bankY = y; cur.bankZ = z
                     map[curLoc] = cur
                     script.onSettingsChanged()
@@ -857,7 +847,7 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
                     if (x != null && y != null && z != null) {
                         bankXYZText = "${x.toInt()},${y.toInt()},${z.toInt()}"
                         val map = script.settings.customLocations
-                        val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
+                        val cur = map[curLoc] ?: com.uberith.uberchop.config.CustomLocation()
                         cur.bankX = x.toInt(); cur.bankY = y.toInt(); cur.bankZ = z.toInt()
                         map[curLoc] = cur
                         script.onSettingsChanged()
@@ -1250,7 +1240,7 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
                 val z = coord?.javaClass?.methods?.firstOrNull { it.parameterCount == 0 && it.name.lowercase().contains("plane") || it.name.lowercase() == "z" || it.name.lowercase() == "getz" }?.invoke(coord) as? Number
                 if (x != null && y != null && z != null) {
                     val map = script.settings.customLocations
-                    val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
+                    val cur = map[curLoc] ?: com.uberith.uberchop.config.CustomLocation()
                     cur.chopX = x.toInt(); cur.chopY = y.toInt(); cur.chopZ = z.toInt()
                     map[curLoc] = cur
                     script.onSettingsChanged()
@@ -1274,7 +1264,7 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
                 val z = coord?.javaClass?.methods?.firstOrNull { it.parameterCount == 0 && it.name.lowercase().contains("plane") || it.name.lowercase() == "z" || it.name.lowercase() == "getz" }?.invoke(coord) as? Number
                 if (x != null && y != null && z != null) {
                     val map = script.settings.customLocations
-                    val cur = map[curLoc] ?: com.uberith.uberchop.CustomLocation()
+                    val cur = map[curLoc] ?: com.uberith.uberchop.config.CustomLocation()
                     cur.bankX = x.toInt(); cur.bankY = y.toInt(); cur.bankZ = z.toInt()
                     map[curLoc] = cur
                     script.onSettingsChanged()
@@ -1373,7 +1363,6 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
         ImGui.text("Logs/hour: ${script.logsPerHour()}")
         ImGui.separator()
         ImGui.text("Target: ${script.targetTree}")
-        ImGui.text("Phase: ${script.phase}")
         ImGui.text("Log handling: " + when (script.settings.logHandlingMode.coerceIn(0, 2)) {
             1 -> "Burn Logs"
             2 -> "Fletch Logs"
@@ -1394,56 +1383,6 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
         ImGui.text("- Breaks/AFK help reduce detection risk.")
     }
 
-    private var debugSelectable = false
-    private fun drawDebug() {
-        ImGui.text("Debug Console")
-        ImGui.sameLine(0f, 8f)
-        debugSelectable = ImGui.checkbox("Selectable", debugSelectable)
-        ImGui.sameLine(0f, 6f)
-        if (ImGui.button("Copy All", 90f, 0f)) {
-            try {
-                val all = readUberChopLogTail(1200).joinToString("\n")
-                val cb = java.awt.Toolkit.getDefaultToolkit().systemClipboard
-                cb.setContents(java.awt.datatransfer.StringSelection(all), null)
-            } catch (_: Throwable) { }
-        }
-        ImGui.sameLine(0f, 6f)
-        if (ImGui.button("Clear File", 90f, 0f)) {
-            try {
-                val home = System.getProperty("user.home")
-                val path = java.nio.file.Paths.get(home, ".BotWithUs", "logs", "UberChop.log")
-                java.nio.file.Files.newBufferedWriter(path, java.nio.charset.StandardCharsets.UTF_8).use { /* truncate */ }
-            } catch (_: Throwable) { }
-        }
-        ImGui.separator()
-        val lines = readUberChopLogTail(400)
-        if (ImGui.beginChild("DebugScroll", 0f, 0f, true, 0)) {
-            if (debugSelectable) {
-                var idx = 0
-                for (ln in lines) {
-                    val clicked = ImGui.selectable("$idx: $ln", false, 0, 0f, 0f)
-                    if (clicked) {
-                        try {
-                            val cb = java.awt.Toolkit.getDefaultToolkit().systemClipboard
-                            cb.setContents(java.awt.datatransfer.StringSelection(ln), null)
-                        } catch (_: Throwable) { }
-                    }
-                    idx++
-                }
-            } else {
-                for (ln in lines) ImGui.text(ln)
-            }
-        }
-        ImGui.endChild()
-    }
-
-    private fun readUberChopLogTail(maxLines: Int): List<String> {
-        return try {
-            val home = System.getProperty("user.home")
-            val path = java.nio.file.Paths.get(home, ".BotWithUs", "logs", "UberChop.log")
-            if (!java.nio.file.Files.exists(path)) return emptyList()
-            val all = java.nio.file.Files.readAllLines(path)
-            if (all.size <= maxLines) all else all.takeLast(maxLines)
-        } catch (_: Throwable) { emptyList() }
-    }
 }
+
+

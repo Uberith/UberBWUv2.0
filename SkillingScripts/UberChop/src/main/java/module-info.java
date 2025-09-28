@@ -12,7 +12,6 @@ module UberChop {
     opens com.uberith.uberchop to BotWithUs.api, com.google.gson;
     opens com.uberith.api.script.handlers to com.google.gson;
     opens com.uberith.api.script to com.google.gson;
-    // Declare service provider so ServiceLoader can discover this script on the module path
     provides net.botwithus.scripts.Script with com.uberith.uberchop.UberChop;
 }
 

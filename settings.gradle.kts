@@ -71,3 +71,6 @@ include(":SkillingScripts:UberChop")
 include(":InternalUtils")
 include(":InternalUtils:UberTestingUtil")
 include(":InternalUtils:SuspendableDemo")
+include(":SkillingScripts:UberChopOld")
+
+

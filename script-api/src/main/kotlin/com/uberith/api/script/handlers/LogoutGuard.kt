@@ -7,6 +7,7 @@ data class LogoutSettings(
     val enabled: Boolean = false,
     val maxHours: Int = 0,
     val maxMinutes: Int = 0,
+    val maxSeconds: Int = 0,
     val targetXpGained: Int = 0,
     val targetActions: Long = 0L
 )
@@ -27,7 +28,8 @@ class LogoutGuard(settings: LogoutSettings = LogoutSettings()) {
     fun shouldLogout(current: RuntimeTracker.Snapshot, progressCounter: Long = 0L): Boolean {
         if (!settings.enabled) return false
 
-        val limitMs = (settings.maxHours * 3600 + settings.maxMinutes * 60).coerceAtLeast(0) * 1000L
+        val limitSeconds = (settings.maxHours * 3600) + (settings.maxMinutes * 60) + settings.maxSeconds
+        val limitMs = limitSeconds.coerceAtLeast(0) * 1000L
         if (limitMs > 0 && current.elapsedMillis >= limitMs) {
             return true
         }

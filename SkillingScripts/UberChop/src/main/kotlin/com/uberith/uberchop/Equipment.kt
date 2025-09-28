@@ -6,6 +6,7 @@ import net.botwithus.rs3.item.InventoryItem
 import net.botwithus.kxapi.game.inventory.Backpack
 import org.slf4j.LoggerFactory
 import java.util.regex.Pattern
+import kotlinx.coroutines.runBlocking
 
 /**
  * Wood box helpers scoped to the UberChop script now that the shared API version was removed.
@@ -22,7 +23,7 @@ object Equipment {
     fun findWoodBox(pattern: Pattern = WOOD_BOX_PATTERN): InventoryItem? =
         Backpack.getItems().firstOrNull { item -> pattern.matcher(item.name).matches() }
 
-    suspend fun ensureWoodBox(
+    fun ensureWoodBox(
         script: SuspendableScript,
         pattern: Pattern = WOOD_BOX_PATTERN,
         withdraw: Boolean = true
@@ -38,12 +39,11 @@ object Equipment {
         val withdrew = Bank.withdraw(pattern, 1)
         logger.info("[Equipment] Bank.withdraw(pattern) -> {}", withdrew)
         if (withdrew) {
-            script.awaitTicks(1)
         }
         return withdrew
     }
 
-    suspend fun fillWoodBox(
+    fun fillWoodBox(
         script: SuspendableScript,
         pattern: Pattern = WOOD_BOX_PATTERN,
         option: String = FILL_OPTION
@@ -56,12 +56,11 @@ object Equipment {
         val interacted = Backpack.interact(box, option)
         logger.info("[Equipment] Backpack.interact('{}') -> {}", option, interacted)
         if (interacted) {
-            script.awaitTicks(1)
         }
         return interacted
     }
 
-    suspend fun emptyWoodBox(
+    fun emptyWoodBox(
         script: SuspendableScript,
         pattern: Pattern = WOOD_BOX_PATTERN,
         option: String = "Empty - logs and bird's nests"
@@ -75,8 +74,9 @@ object Equipment {
             logger.info("[Equipment] Bank must be open to empty the wood box")
             return false
         }
-        val emptied = Bank.emptyBox(script, box.name, option)
+        val emptied = runBlocking { Bank.emptyBox(script, box.name, option) }
         logger.info("[Equipment] Bank.emptyBox(option='{}') -> {}", option, emptied)
         return emptied
     }
 }
+

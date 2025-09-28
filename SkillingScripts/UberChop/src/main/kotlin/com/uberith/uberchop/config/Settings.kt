@@ -1,4 +1,4 @@
-package com.uberith.uberchop
+package com.uberith.uberchop.config
 
 import net.botwithus.kxapi.game.skilling.impl.woodcutting.TreeType
 
@@ -108,4 +108,5 @@ data class CustomLocation(
     var bankY: Int? = null,
     var bankZ: Int? = null
 )
+
 

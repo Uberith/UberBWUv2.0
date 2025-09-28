@@ -29,6 +29,7 @@
             <option value="$PROJECT_DIR$/InternalUtils/UberTestingUtil" />
             <option value="$PROJECT_DIR$/SkillingScripts" />
             <option value="$PROJECT_DIR$/SkillingScripts/UberChop" />
+            <option value="$PROJECT_DIR$/SkillingScripts/UberChopOld" />
             <option value="$PROJECT_DIR$/script-api" />
           </set>
         </option>
