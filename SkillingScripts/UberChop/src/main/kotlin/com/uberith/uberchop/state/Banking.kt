@@ -18,19 +18,23 @@ class Banking(
     constructor(script: UberChop) : this(script, BotState.BANKING.description)
 
     override fun StateBuilder<UberChop>.create() {
-        // Only enter the banking tree when logs are actually present.
-        branch(BranchName("BackpackHasLogs"), condition = {
-            Backpack.contains(bot.logPattern)
+        branch(BranchName("NeedsBanking"), condition = {
+            val needsWoodBox = bot.shouldUseWoodBox && (
+                !Equipment.hasWoodBox() ||
+                    (bot.woodBoxWithdrawAttempted && !bot.woodBoxWithdrawSucceeded)
+            )
+            Backpack.contains(bot.logPattern) ||
+                (bot.settings.pickupNests && Backpack.contains(bot.birdNestPattern)) ||
+                needsWoodBox
         }) {
             onSuccess(BranchName("BankIsOpen"))
             onFailure(LeafName("SwitchToChopping"))
         }
 
-        // Keep retrying the open interaction until the client reports the bank is ready.
         branch(BranchName("BankIsOpen"), condition = {
             Bank.isOpen()
         }) {
-            onSuccess(LeafName("DepositLogs"))
+            onSuccess(BranchName("ShouldDepositLogs"))
             onFailure(BranchName("NearBank"))
         }
 
@@ -83,28 +87,44 @@ class Banking(
                 .onFailure { bot.warn("Bank open failed: ${it.message}") }
         }
 
+        branch(BranchName("ShouldDepositLogs"), condition = {
+            Backpack.contains(bot.logPattern)
+        }) {
+            onSuccess(LeafName("DepositLogs"))
+            onFailure(BranchName("ShouldDepositNests"))
+        }
+
+        branch(BranchName("ShouldDepositNests"), condition = {
+            bot.settings.pickupNests && Backpack.contains(bot.birdNestPattern)
+        }) {
+            onSuccess(LeafName("DepositBirdNests"))
+            onFailure(BranchName("ShouldWithdrawWoodBox"))
+        }
+
+        branch(BranchName("ShouldWithdrawWoodBox"), condition = {
+            bot.shouldUseWoodBox && !Equipment.hasWoodBox() && bot.canAttemptWoodBoxWithdraw()
+        }) {
+            onSuccess(LeafName("WithdrawWoodBox"))
+            onFailure(BranchName("AwaitWoodBox"))
+        }
+
+        branch(BranchName("AwaitWoodBox"), condition = {
+            bot.shouldUseWoodBox && !Equipment.hasWoodBox()
+        }) {
+            onSuccess(LeafName("WaitForWoodBox"))
+            onFailure(LeafName("SwitchToChopping"))
+        }
+
         // Dump any matching log items, then let chopping try again.
         leaf(LeafName("DepositLogs")) {
             if (!Backpack.contains(bot.logPattern)) {
-                bot.switchState(BotState.CHOPPING, "Nothing to bank")
                 return@leaf
             }
 
             val emptiedWoodBox = Equipment.hasWoodBox() && Equipment.emptyWoodBox(bot)
             if (emptiedWoodBox) {
                 bot.updateStatus("Emptying wood box")
-                bot.delay(1)
-            }
-
-            if (bot.shouldUseWoodBox) {
-                if (!Equipment.hasWoodBox() && bot.ensureWoodBoxInBackpack(
-                        statusMessage = "Retrieving wood box",
-                        warnMessage = "Unable to retrieve wood box during banking; continuing without box",
-                        errorMessage = "Failed to retrieve wood box during banking"
-                    )
-                ) {
-                    return@leaf
-                }
+                bot.delay(5)
             }
 
             bot.updateStatus("Depositing logs")
@@ -130,7 +150,7 @@ class Banking(
                 if (fallbackWorked) {
                     bot.info("DepositLogs: fallback backpack interactions triggered")
                     depositResult = true
-                    bot.delay(1)
+                    bot.delay(5)
                 }
                 stillContainsLogs = Backpack.contains(bot.logPattern)
                 if (stillContainsLogs) {
@@ -138,45 +158,119 @@ class Banking(
                 }
             }
 
-            if (bot.settings.pickupNests) {
-                var nestsDeposited = runCatching { Bank.depositAll(bot, bot.birdNestPattern) }
-                    .onFailure { error -> bot.warn("DepositLogs: depositAll(bird nests) threw ${error.message}") }
-                    .getOrElse { false }
-                var stillHasNests = Backpack.contains(bot.birdNestPattern)
-                bot.info(
-                    "DepositLogs: depositAll(bird nests) -> $nestsDeposited; stillContains=$stillHasNests"
-                )
-                if (stillHasNests) {
-                    var fallbackAttempts = 0
-                    while (stillHasNests && fallbackAttempts < 5) {
-                        val fallbackWorked = bot.depositItemsFallback(bot.birdNestPattern)
-                        if (!fallbackWorked) {
-                            bot.debug("DepositLogs: bird nest fallback attempt ${fallbackAttempts + 1} made no progress")
-                            break
-                        }
-                        nestsDeposited = true
-                        fallbackAttempts++
-                        bot.delay(1)
-                        stillHasNests = Backpack.contains(bot.birdNestPattern)
-                        bot.info(
-                            "DepositLogs: bird nest fallback attempt $fallbackAttempts stillContains=$stillHasNests"
-                        )
+            val booleanValue = !Backpack.isFull()
+            val callableBoolean: () -> Boolean = { booleanValue }
+            bot.delayUntil(callableBoolean, 10)
+
+            bot.chopWorkedLastTick = false
+        }
+
+        leaf(LeafName("DepositBirdNests")) {
+            if (!bot.settings.pickupNests) {
+                return@leaf
+            }
+            if (!Backpack.contains(bot.birdNestPattern)) {
+                return@leaf
+            }
+
+            bot.updateStatus("Depositing bird nests")
+
+            var nestsDeposited = runCatching { Bank.depositAll(bot, bot.birdNestPattern) }
+                .onFailure { error -> bot.warn("DepositBirdNests: depositAll(bird nests) threw ${error.message}") }
+                .getOrElse { false }
+            var stillHasNests = Backpack.contains(bot.birdNestPattern)
+            bot.info(
+                "DepositBirdNests: depositAll -> $nestsDeposited; stillContains=$stillHasNests"
+            )
+            bot.delay(1)
+            if (stillHasNests) {
+                var fallbackAttempts = 0
+                while (stillHasNests && fallbackAttempts < 5) {
+                    val fallbackWorked = bot.depositItemsFallback(bot.birdNestPattern)
+                    if (!fallbackWorked) {
+                        bot.debug("DepositBirdNests: fallback attempt ${fallbackAttempts + 1} made no progress")
+                        break
                     }
-                    if (stillHasNests) {
-                        bot.warn("DepositLogs: backpack still has bird nests after all deposit attempts")
-                    }
+                    nestsDeposited = true
+                    fallbackAttempts++
+                    stillHasNests = Backpack.contains(bot.birdNestPattern)
+                    bot.info(
+                        "DepositBirdNests: fallback attempt $fallbackAttempts stillContains=$stillHasNests"
+                    )
+                    bot.delay(1)
                 }
+                if (stillHasNests) {
+                    bot.warn("DepositBirdNests: backpack still has bird nests after all deposit attempts")
+                }
+            }
+
+            val booleanValue = !Backpack.isFull()
+            val callableBoolean: () -> Boolean = { booleanValue }
+            bot.delayUntil(callableBoolean, 10)
+
+            bot.chopWorkedLastTick = false
+        }
+
+        leaf(LeafName("WithdrawWoodBox")) {
+            if (!bot.shouldUseWoodBox) {
+                return@leaf
+            }
+
+            bot.woodBoxWithdrawAttempted = false
+            bot.woodBoxWithdrawSucceeded = false
+
+            if (Equipment.hasWoodBox()) {
+                bot.recordWoodBoxWithdraw(true)
+                return@leaf
+            }
+            if (Backpack.isFull()) {
+                bot.warn("WithdrawWoodBox: backpack is full; cannot withdraw wood box")
+                bot.recordWoodBoxWithdraw(false)
+                return@leaf
+            }
+
+            bot.updateStatus("Withdrawing wood box")
+
+            val withdrew = runCatching { Bank.withdraw(bot.woodBoxPattern, 1) }
+                .onFailure { error -> bot.warn("WithdrawWoodBox: withdraw threw ${error.message}") }
+                .getOrElse { false }
+
+            if (!withdrew) {
+                bot.warn("WithdrawWoodBox: failed to withdraw wood box from bank")
+                bot.recordWoodBoxWithdraw(false)
+            } else {
+                bot.recordWoodBoxWithdraw(true)
+                bot.delay(1)
             }
 
             bot.chopWorkedLastTick = false
         }
 
-        // Fall back to chopping when there is nothing left to bank.
-        leaf(LeafName("SwitchToChopping")) {
-            bot.switchState(BotState.CHOPPING, "Backpack clear")
+        leaf(LeafName("WaitForWoodBox")) {
+            bot.updateStatus("Waiting for wood box availability")
+            bot.delay(1)
         }
 
-        root(BranchName("BackpackHasLogs"))
+        // Fall back to chopping when there is nothing left to bank.
+        leaf(LeafName("SwitchToChopping")) {
+            if (bot.shouldUseWoodBox && !Equipment.hasWoodBox()) {
+                bot.debug("SwitchToChopping: still waiting for wood box")
+                return@leaf
+            }
+
+            if (Bank.isOpen()) {
+                bot.updateStatus("Closing bank")
+                runCatching { Bank.close() }
+                    .onFailure { error -> bot.warn("SwitchToChopping: Bank.close() threw ${error.message}") }
+            }
+            bot.woodBoxWithdrawAttempted = false
+            bot.woodBoxWithdrawSucceeded = false
+            bot.switchState(BotState.CHOPPING, "Backpack clear")
+            bot.chopWorkedLastTick = false
+        }
+
+        root(BranchName("NeedsBanking"))
     }
+
 }
 

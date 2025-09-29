@@ -10,9 +10,13 @@ import com.uberith.uberchop.gui.UberChopGUI
 import com.uberith.uberchop.state.Banking
 import com.uberith.uberchop.state.BotState
 import com.uberith.uberchop.state.Chopping
+import com.uberith.api.utils.Statistics
 import net.botwithus.kxapi.game.inventory.Backpack
 import net.botwithus.kxapi.permissive.PermissiveDSL
 import net.botwithus.kxapi.permissive.PermissiveScript
+import net.botwithus.events.EventInfo
+import net.botwithus.rs3.inventories.events.InventoryEvent
+import net.botwithus.rs3.item.InventoryItem
 import net.botwithus.rs3.stats.Stats
 import net.botwithus.rs3.world.Coordinate
 import net.botwithus.scripts.Info
@@ -36,6 +40,13 @@ import kotlin.math.roundToInt
 )
 
 class UberChop : PermissiveScript<BotState>(debug = false) {
+    private companion object {
+        private const val BACKPACK_INVENTORY_ID = 93
+        private const val STAT_LOGS_KEY = "logs"
+        private const val STAT_LOGS_PER_HOUR_KEY = "logsPerHour"
+        private const val STAT_BIRD_NESTS_KEY = "birdNests"
+    }
+
     /**
      * Minimal woodcutting loop that hands control to two permissive states.
      * The class only tracks shared context (settings, tiles, cached flags) so
@@ -45,8 +56,11 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
     private val gson = Gson()
     // Lazy regex for any item whose name contains "logs".
     internal val logPattern = Pattern.compile(".*logs.*", Pattern.CASE_INSENSITIVE)
-    internal val birdNestPattern = Pattern.compile(".*bird's nest.*", Pattern.CASE_INSENSITIVE)
-    private val birdNestRegex = Regex("(?i).*bird's nest.*")
+    internal val birdNestPattern = Pattern.compile(".*bird['\\u2019]?s nest.*", Pattern.CASE_INSENSITIVE)
+    private val birdNestRegex = Regex("(?i).*bird['\\u2019]?s nest.*")
+    private val statistics = Statistics("UberChop")
+    private val statsLock = Any()
+    val woodBoxPattern: Pattern = Pattern.compile(".*wood box.*", Pattern.CASE_INSENSITIVE)
     internal enum class LogHandling {
         BANK,
         BURN,
@@ -64,6 +78,10 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
     // Simple guard to avoid spamming movement requests while one is "in flight".
     internal val movementGate = AtomicBoolean(false)
     private val gui by lazy { UberChopGUI(this) }
+    private val woodBoxRetryCooldownMs = 30_000L
+    private var nextWoodBoxWithdrawTimeMs: Long = 0L
+    internal var woodBoxWithdrawAttempted = false
+    internal var woodBoxWithdrawSucceeded = false
 
     private var mode: BotState = BotState.CHOPPING
     private var statusText: String = "Starting up"
@@ -79,6 +97,8 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
     var bankTile: Coordinate? = null
 
     @Volatile var logsChopped: Int = 0
+        private set
+    @Volatile var birdNestsCollected: Int = 0
         private set
     val treeLocations: List<TreeLocation>
         get() = TreeLocations.ALL
@@ -108,6 +128,7 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
     override fun onInitialize() {
         super.onInitialize()
         startTimeMs = System.currentTimeMillis()
+        resetRuntimeStatistics()
         runCatching { gui.preload() }
 
         ensureUiSettingsLoaded()
@@ -126,6 +147,16 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
         }
 
         switchState(initialState, reason)
+    }
+
+    private fun resetRuntimeStatistics() {
+        synchronized(statsLock) {
+            logsChopped = 0
+            birdNestsCollected = 0
+            statistics.saveStatistic(STAT_LOGS_KEY, logsChopped)
+            statistics.saveStatistic(STAT_LOGS_PER_HOUR_KEY, 0)
+            statistics.saveStatistic(STAT_BIRD_NESTS_KEY, birdNestsCollected)
+        }
     }
 
     override fun onPreTick(): Boolean {
@@ -248,6 +279,19 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
     internal fun depositLogsFallback(maxIterations: Int = 10): Boolean =
         depositItemsFallback(logPattern, maxIterations)
 
+    internal fun canAttemptWoodBoxWithdraw(): Boolean =
+        System.currentTimeMillis() >= nextWoodBoxWithdrawTimeMs
+
+
+    internal fun recordWoodBoxWithdraw(success: Boolean) {
+        woodBoxWithdrawAttempted = true
+        woodBoxWithdrawSucceeded = success
+        nextWoodBoxWithdrawTimeMs = if (success) 0L else System.currentTimeMillis() + woodBoxRetryCooldownMs
+        if (!success) {
+            log.debug("Wood box withdraw retry delayed for ${woodBoxRetryCooldownMs / 1000}s")
+        }
+    }
+
     internal fun ensureWoodBoxInBackpack(
         statusMessage: String,
         warnMessage: String,
@@ -258,9 +302,11 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
         }
 
         updateStatus(statusMessage)
+
         val retrieved = runCatching { Equipment.ensureWoodBox(this) }
             .onFailure { log.error(errorMessage, it) }
             .getOrDefault(false)
+
         if (retrieved) {
             return true
         }
@@ -268,8 +314,57 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
         if (!Equipment.hasWoodBox()) {
             log.warn(warnMessage)
         }
-
         return false
+    }
+
+    private fun computeAcquiredQuantity(oldItem: InventoryItem, newItem: InventoryItem): Int {
+        if (newItem.id <= -1) {
+            return 0
+        }
+
+        if (oldItem.id <= -1) {
+            return newItem.quantity
+        }
+
+        if (oldItem.id == newItem.id) {
+            val delta = newItem.quantity - oldItem.quantity
+            return if (delta > 0) delta else 0
+        }
+        return newItem.quantity
+    }
+
+    @EventInfo(type = InventoryEvent::class)
+    private fun onInventoryEvent(event: InventoryEvent) {
+        if (event.inventory.id != BACKPACK_INVENTORY_ID) {
+            return
+        }
+
+        val oldItem = event.oldItem()
+        val newItem = event.newItem()
+        val quantityAdded = computeAcquiredQuantity(oldItem, newItem)
+        if (quantityAdded <= 0) {
+            return
+        }
+
+        val itemName = newItem.name
+        val isLog = logPattern.matcher(itemName).matches()
+        val isBirdNest = settings.pickupNests && birdNestRegex.matches(itemName)
+
+        if (!isLog && !isBirdNest) {
+            return
+        }
+
+        synchronized(statsLock) {
+            if (isLog) {
+                logsChopped += quantityAdded
+                statistics.saveStatistic(STAT_LOGS_KEY, logsChopped)
+                statistics.saveStatistic(STAT_LOGS_PER_HOUR_KEY, logsPerHour())
+            }
+            if (isBirdNest) {
+                birdNestsCollected += quantityAdded
+                statistics.saveStatistic(STAT_BIRD_NESTS_KEY, birdNestsCollected)
+            }
+        }
     }
 
     fun formattedRuntime(): String {

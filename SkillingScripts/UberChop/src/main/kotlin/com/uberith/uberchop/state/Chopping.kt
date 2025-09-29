@@ -19,6 +19,13 @@ class Chopping(
     constructor(script: UberChop) : this(script, BotState.CHOPPING.description)
 
     override fun StateBuilder<UberChop>.create() {
+        branch(BranchName("NeedsWoodBox"), condition = {
+            bot.shouldUseWoodBox && !Equipment.hasWoodBox()
+        }) {
+            onSuccess(LeafName("SwitchToBankForWoodBox"))
+            onFailure(BranchName("BackpackIsFull"))
+        }
+
         // Stop swinging when the pack is full so the banking tree can take over.
         branch(BranchName("BackpackIsFull"), condition = { Backpack.isFull() }) {
             onSuccess(LeafName("HandleFullBackpack"))
@@ -111,6 +118,11 @@ class Chopping(
             }
         }
 
+        leaf(LeafName("SwitchToBankForWoodBox")) {
+            bot.updateStatus("Retrieving wood box")
+            bot.switchState(BotState.BANKING, "Retrieve wood box")
+        }
+
         // Hand control to the banking state when the inventory is capped.
         leaf(LeafName("HandleFullBackpack")) {
             if (bot.shouldUseWoodBox && Equipment.hasWoodBox()) {
@@ -128,7 +140,7 @@ class Chopping(
                     bot.warn("HandleFullBackpack: wood box filled but backpack remains full")
                 }
             }
-
+            bot.delay(1)
             if (!Backpack.isFull()) {
                 bot.switchState(BotState.CHOPPING, "Backpack had space after wood box fill")
                 return@leaf
@@ -137,7 +149,7 @@ class Chopping(
             bot.switchState(BotState.BANKING, "Backpack is full")
         }
 
-        root(BranchName("BackpackIsFull"))
+        root(BranchName("NeedsWoodBox"))
     }
 }
 

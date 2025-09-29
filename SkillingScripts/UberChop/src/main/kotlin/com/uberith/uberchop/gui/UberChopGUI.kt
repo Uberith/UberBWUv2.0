@@ -952,7 +952,7 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
         }
         run {
             val old = script.settings.withdrawWoodBox
-            val v = ImGui.checkbox("Withdraw Wood Box", old)
+            val v = ImGui.checkbox("Use Wood Box", old)
             if (v != old) { script.settings.withdrawWoodBox = v; changed = true }
         }
         if (changed) script.onSettingsChanged()
@@ -1361,6 +1361,9 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
         ImGui.text("Runtime: ${script.formattedRuntime()}")
         ImGui.text("Logs chopped: ${script.logsChopped}")
         ImGui.text("Logs/hour: ${script.logsPerHour()}")
+        if (script.settings.pickupNests) {
+            ImGui.text("Bird nests collected: ${script.birdNestsCollected}")
+        }
         ImGui.separator()
         ImGui.text("Target: ${script.targetTree}")
         ImGui.text("Log handling: " + when (script.settings.logHandlingMode.coerceIn(0, 2)) {
