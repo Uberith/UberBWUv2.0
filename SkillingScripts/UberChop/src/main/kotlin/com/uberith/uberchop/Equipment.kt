@@ -73,8 +73,12 @@ object Equipment {
             logger.info("[Equipment] Bank must be open to empty the wood box")
             return false
         }
-        logger.warn("[Equipment] emptyWoodBox is not supported on PermissiveScript; skipping request")
-        return false
+        val interacted = Backpack.interact(box, option)
+        logger.info("[Equipment] Backpack.interact('{}') -> {}", option, interacted)
+        if (interacted) {
+            script.info("Emptying wood box contents into bank")
+        }
+        return interacted
     }
 }
 

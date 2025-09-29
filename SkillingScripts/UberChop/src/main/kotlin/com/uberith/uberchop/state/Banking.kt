@@ -25,7 +25,9 @@ class Banking(
         }
 
         // Keep retrying the open interaction until the client reports the bank is ready.
-        branch(BranchName("BankIsOpen"), condition = { Bank.isOpen() }) {
+        branch(BranchName("BankIsOpen"), condition = {
+            Bank.isOpen()
+        }) {
             onSuccess(LeafName("DepositLogs"))
             onFailure(LeafName("OpenBank"))
         }
@@ -44,11 +46,13 @@ class Banking(
                 return@leaf
             }
 
+            val emptiedWoodBox = Equipment.hasWoodBox() && Equipment.emptyWoodBox(bot)
+            if (emptiedWoodBox) {
+                bot.updateStatus("Emptying wood box")
+                bot.delay(1)
+            }
+
             if (bot.shouldUseWoodBox) {
-                if (Equipment.emptyWoodBox(bot)) {
-                    bot.updateStatus("Emptying wood box")
-                    return@leaf
-                }
                 if (!Equipment.hasWoodBox() && bot.ensureWoodBoxInBackpack(
                         statusMessage = "Retrieving wood box",
                         warnMessage = "Unable to retrieve wood box during banking; continuing without box",
@@ -87,6 +91,19 @@ class Banking(
                 stillContainsLogs = Backpack.contains(bot.logPattern)
                 if (stillContainsLogs) {
                     bot.warn("DepositLogs: backpack still has log-pattern items after all deposit attempts")
+                }
+            }
+
+            if (bot.settings.pickupNests && Backpack.contains(bot.birdNestPattern)) {
+                val nestsDeposited = runCatching { Bank.depositAll(bot, bot.birdNestPattern) }
+                    .onFailure { error -> bot.warn("DepositLogs: depositAll(bird nests) threw ${error.message}") }
+                    .getOrElse { false }
+                val stillHasNests = Backpack.contains(bot.birdNestPattern)
+                bot.info(
+                    "DepositLogs: depositAll(bird nests) -> $nestsDeposited; stillContains=$stillHasNests"
+                )
+                if (stillHasNests && nestsDeposited) {
+                    bot.warn("DepositLogs: backpack still has bird nests after deposit attempt")
                 }
             }
 

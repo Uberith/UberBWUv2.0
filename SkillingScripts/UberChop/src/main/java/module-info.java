@@ -10,6 +10,7 @@ module UberChop {
     requires static java.desktop;
 
     opens com.uberith.uberchop to BotWithUs.api, com.google.gson;
+    opens com.uberith.uberchop.config to com.google.gson;
     opens com.uberith.api.script.handlers to com.google.gson;
     opens com.uberith.api.script to com.google.gson;
     provides net.botwithus.scripts.Script with com.uberith.uberchop.UberChop;

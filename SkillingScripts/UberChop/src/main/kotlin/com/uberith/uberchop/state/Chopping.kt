@@ -22,6 +22,13 @@ class Chopping(
         // Stop swinging when the pack is full so the banking tree can take over.
         branch(BranchName("BackpackIsFull"), condition = { Backpack.isFull() }) {
             onSuccess(LeafName("HandleFullBackpack"))
+            onFailure(BranchName("ShouldPickupNest"))
+        }
+
+        branch(BranchName("ShouldPickupNest"), condition = {
+            bot.shouldPickupBirdNest()
+        }) {
+            onSuccess(LeafName("PickupBirdNest"))
             onFailure(BranchName("TreeIsReachable"))
         }
 
@@ -62,6 +69,17 @@ class Chopping(
             }
         }
 
+        leaf(LeafName("PickupBirdNest")) {
+            bot.updateStatus("Collecting bird's nest")
+            val pickedUp = bot.pickupBirdNests()
+            if (pickedUp) {
+                bot.delay(1)
+            } else {
+                bot.debug("PickupBirdNest: no nests present on attempt")
+            }
+            bot.chopWorkedLastTick = false
+        }
+
         leaf(LeafName("MaintainChopping")) {
             val treeName = bot.targetTree.ifBlank { "Tree" }
             bot.updateStatus("Chopping $treeName")
@@ -71,6 +89,15 @@ class Chopping(
         // Swing at the tree again when we either just moved or a new action is needed.
         leaf(LeafName("StartChopping")) {
             val treeName = bot.targetTree.ifBlank { "Tree" }
+            val player = LocalPlayer.self()
+            if (player == null) {
+                bot.warn("StartChopping: no local player instance available")
+                return@leaf
+            }
+            if (player.isMoving) {
+                bot.debug("StartChopping: player still moving; deferring new swing")
+                return@leaf
+            }
             bot.chopWorkedLastTick = false
             bot.updateStatus("Chopping $treeName")
             val started = runCatching {
@@ -100,6 +127,11 @@ class Chopping(
                     }
                     bot.warn("HandleFullBackpack: wood box filled but backpack remains full")
                 }
+            }
+
+            if (!Backpack.isFull()) {
+                bot.switchState(BotState.CHOPPING, "Backpack had space after wood box fill")
+                return@leaf
             }
 
             bot.switchState(BotState.BANKING, "Backpack is full")
