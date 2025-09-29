@@ -35,7 +35,7 @@ import kotlin.math.roundToInt
     author = "Uberith"
 )
 
-class UberChop : PermissiveScript<BotState>(debug = true) {
+class UberChop : PermissiveScript<BotState>(debug = false) {
     /**
      * Minimal woodcutting loop that hands control to two permissive states.
      * The class only tracks shared context (settings, tiles, cached flags) so
@@ -222,10 +222,13 @@ class UberChop : PermissiveScript<BotState>(debug = true) {
         BotState.BANKING -> Banking(this)
     }
 
-    internal fun depositLogsFallback(maxIterations: Int = 10): Boolean {
+    internal fun depositItemsFallback(
+        pattern: Pattern,
+        maxIterations: Int = 10
+    ): Boolean {
         var depositedAny = false
         repeat(maxIterations) {
-            val item = Backpack.getItems().firstOrNull { logPattern.matcher(it.name).matches() }
+            val item = Backpack.getItems().firstOrNull { pattern.matcher(it.name).matches() }
                 ?: return depositedAny
             val interacted = Backpack.interact(item, "Deposit-All") ||
                 Backpack.interact(item, "Deposit") ||
@@ -241,6 +244,9 @@ class UberChop : PermissiveScript<BotState>(debug = true) {
 
         return depositedAny
     }
+
+    internal fun depositLogsFallback(maxIterations: Int = 10): Boolean =
+        depositItemsFallback(logPattern, maxIterations)
 
     internal fun ensureWoodBoxInBackpack(
         statusMessage: String,
@@ -385,3 +391,4 @@ class UberChop : PermissiveScript<BotState>(debug = true) {
     private fun toCoordinate(x: Int?, y: Int?, z: Int?): Coordinate? =
         if (x != null && y != null && z != null) Coordinate(x, y, z) else null
 }
+

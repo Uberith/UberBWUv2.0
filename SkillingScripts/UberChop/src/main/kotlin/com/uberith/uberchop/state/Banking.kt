@@ -1,9 +1,11 @@
 package com.uberith.uberchop.state
 
+import com.uberith.api.game.world.Coordinates
 import com.uberith.uberchop.Equipment
 import com.uberith.uberchop.UberChop
 import net.botwithus.kxapi.game.inventory.Backpack
 import net.botwithus.kxapi.game.inventory.Bank
+import net.botwithus.xapi.game.traversal.Traverse
 import net.botwithus.kxapi.permissive.dsl.BranchName
 import net.botwithus.kxapi.permissive.dsl.LeafName
 import net.botwithus.kxapi.permissive.dsl.StateBuilder
@@ -29,11 +31,53 @@ class Banking(
             Bank.isOpen()
         }) {
             onSuccess(LeafName("DepositLogs"))
-            onFailure(LeafName("OpenBank"))
+            onFailure(BranchName("NearBank"))
+        }
+
+        branch(BranchName("NearBank"), condition = {
+            val bankTile = bot.bankTile
+            bankTile == null || Coordinates.isPlayerWithinRadius(bankTile, 5)
+        }) {
+            onSuccess(LeafName("OpenBank"))
+            onFailure(LeafName("StepToBank"))
+        }
+
+        leaf(LeafName("StepToBank")) {
+            val bankTile = bot.bankTile
+            if (bankTile == null) {
+                bot.warn("StepToBank: bank tile is not configured; skipping navigation")
+                return@leaf
+            }
+
+            if (Coordinates.isPlayerWithinRadius(bankTile, 5)) {
+                return@leaf
+            }
+
+            if (!bot.movementGate.compareAndSet(false, true)) {
+                return@leaf
+            }
+
+            try {
+                bot.updateStatus("Walking to bank")
+                val traversed = runCatching { Traverse.to(bankTile) }
+                    .onFailure { error -> bot.warn("StepToBank: traverse failed ${error.message}") }
+                    .getOrDefault(false)
+                if (!traversed) {
+                    bot.debug("StepToBank: traversal request was not started")
+                }
+            } finally {
+                bot.movementGate.set(false)
+            }
         }
 
         // Attempt to open the nearest bank chest or booth.
         leaf(LeafName("OpenBank")) {
+            val bankTile = bot.bankTile
+            if (bankTile != null && !Coordinates.isPlayerWithinRadius(bankTile, 5)) {
+                bot.debug("OpenBank: not within 5 tiles of bank; stepping closer")
+                return@leaf
+            }
+
             bot.updateStatus("Opening bank")
             runCatching { Bank.open(bot) }
                 .onFailure { bot.warn("Bank open failed: ${it.message}") }
@@ -94,16 +138,33 @@ class Banking(
                 }
             }
 
-            if (bot.settings.pickupNests && Backpack.contains(bot.birdNestPattern)) {
-                val nestsDeposited = runCatching { Bank.depositAll(bot, bot.birdNestPattern) }
+            if (bot.settings.pickupNests) {
+                var nestsDeposited = runCatching { Bank.depositAll(bot, bot.birdNestPattern) }
                     .onFailure { error -> bot.warn("DepositLogs: depositAll(bird nests) threw ${error.message}") }
                     .getOrElse { false }
-                val stillHasNests = Backpack.contains(bot.birdNestPattern)
+                var stillHasNests = Backpack.contains(bot.birdNestPattern)
                 bot.info(
                     "DepositLogs: depositAll(bird nests) -> $nestsDeposited; stillContains=$stillHasNests"
                 )
-                if (stillHasNests && nestsDeposited) {
-                    bot.warn("DepositLogs: backpack still has bird nests after deposit attempt")
+                if (stillHasNests) {
+                    var fallbackAttempts = 0
+                    while (stillHasNests && fallbackAttempts < 5) {
+                        val fallbackWorked = bot.depositItemsFallback(bot.birdNestPattern)
+                        if (!fallbackWorked) {
+                            bot.debug("DepositLogs: bird nest fallback attempt ${fallbackAttempts + 1} made no progress")
+                            break
+                        }
+                        nestsDeposited = true
+                        fallbackAttempts++
+                        bot.delay(1)
+                        stillHasNests = Backpack.contains(bot.birdNestPattern)
+                        bot.info(
+                            "DepositLogs: bird nest fallback attempt $fallbackAttempts stillContains=$stillHasNests"
+                        )
+                    }
+                    if (stillHasNests) {
+                        bot.warn("DepositLogs: backpack still has bird nests after all deposit attempts")
+                    }
                 }
             }
 
