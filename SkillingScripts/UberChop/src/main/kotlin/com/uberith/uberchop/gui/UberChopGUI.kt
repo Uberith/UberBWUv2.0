@@ -12,6 +12,7 @@ import com.uberith.api.ui.CustomImages
 import net.botwithus.kxapi.game.skilling.impl.woodcutting.TreeType
 import net.botwithus.rs3.entities.LocalPlayer
 import net.botwithus.rs3.world.ClientState
+import java.util.Locale
 import net.botwithus.ui.workspace.Workspace
 import net.botwithus.scripts.Info
 
@@ -53,6 +54,17 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
         renderInternal()
     }
 
+    private fun formatNumber(value: Number): String = String.format(Locale.US, "%,d", value.toLong())
+
+    private fun formatDuration(ms: Long): String {
+        if (ms <= 0L) return "00:00:00"
+        val totalSeconds = ms / 1000
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
+        return String.format("%02d:%02d:%02d", hours, minutes, seconds)
+    }
+
     private fun adjustInt(label: String, value: Int, min: Int, max: Int, step: Int = 1): Int {
         ImGui.text(label)
         ImGui.sameLine(0f, 6f)
@@ -81,7 +93,7 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
             cm.pushColors()
             // Top logo + summary with minimize/expand toggle
             drawLogoBar()
-            ImGui.text("Runtime ${script.formattedRuntime()}  |  Logs ${script.logsChopped} (${script.logsPerHour()}/h)  |  Status ${script.currentStatus}")
+            ImGui.text("Runtime ${script.formattedRuntime()}  |  Logs ${formatNumber(script.logsChopped)} (${formatNumber(script.logsPerHour())}/h)  |  Status ${script.currentStatus}")
             ImGui.sameLine(0f, 8f)
             ImGui.separator()
 
@@ -1359,10 +1371,11 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
         ImGui.text("Statistics")
         ImGui.separator()
         ImGui.text("Runtime: ${script.formattedRuntime()}")
-        ImGui.text("Logs chopped: ${script.logsChopped}")
-        ImGui.text("Logs/hour: ${script.logsPerHour()}")
+        ImGui.text("Logs chopped: ${formatNumber(script.logsChopped)} (${formatNumber(script.logsPerHour())} /h)")
+        ImGui.text("XP gained: ${formatNumber(script.woodcuttingXpGained())} (${formatNumber(script.woodcuttingXpPerHour())} /h)")
+        ImGui.text("Levels gained: ${formatNumber(script.woodcuttingLevelsGained())}")
         if (script.settings.pickupNests) {
-            ImGui.text("Bird nests collected: ${script.birdNestsCollected}")
+            ImGui.text("Bird nests collected: ${formatNumber(script.birdNestsCollected)} (${formatNumber(script.birdNestsPerHour())} /h)")
         }
         ImGui.separator()
         ImGui.text("Target: ${script.targetTree}")
@@ -1371,6 +1384,12 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
             2 -> "Fletch Logs"
             else -> "Bank Logs"
         })
+        ImGui.separator()
+        ImGui.text("Overall Logs: ${formatNumber(script.lifetimeLogsChopped())} (${formatNumber(script.lifetimeLogsPerHour())} /h)")
+        ImGui.text("Overall Bird nests: ${formatNumber(script.lifetimeBirdNestsCollected())} (${formatNumber(script.lifetimeBirdNestsPerHour())} /h)")
+        ImGui.text("Overall XP: ${formatNumber(script.lifetimeWoodcuttingXpGained())} (${formatNumber(script.lifetimeWoodcuttingXpPerHour())} /h)")
+        ImGui.text("Overall Levels: ${formatNumber(script.lifetimeWoodcuttingLevelsGained())}")
+        ImGui.text("Overall Runtime: ${formatDuration(script.lifetimeRuntimeMillis())}")
     }
 
     private fun drawSupport() {

@@ -133,7 +133,7 @@ class Banking(
                 .filter { item -> bot.logPattern.matcher(item.name).find() }
                 .map { item -> "${item.name} (id=${item.id})" }
             val sample = matchingItems.take(5).joinToString()
-            bot.info(
+            bot.debug(
                 "DepositLogs: bankOpen=${Bank.isOpen()} matches=${matchingItems.size} sample=[$sample]"
             )
 
@@ -142,13 +142,13 @@ class Banking(
                 .getOrElse { false }
 
             var stillContainsLogs = Backpack.contains(bot.logPattern)
-            bot.info(
+            bot.debug(
                 "DepositLogs: depositAll(pattern) -> $depositResult; stillContains=$stillContainsLogs"
             )
             if (stillContainsLogs) {
                 val fallbackWorked = bot.depositLogsFallback()
                 if (fallbackWorked) {
-                    bot.info("DepositLogs: fallback backpack interactions triggered")
+                    bot.debug("DepositLogs: fallback backpack interactions triggered")
                     depositResult = true
                     bot.delay(5)
                 }
@@ -179,7 +179,7 @@ class Banking(
                 .onFailure { error -> bot.warn("DepositBirdNests: depositAll(bird nests) threw ${error.message}") }
                 .getOrElse { false }
             var stillHasNests = Backpack.contains(bot.birdNestPattern)
-            bot.info(
+            bot.debug(
                 "DepositBirdNests: depositAll -> $nestsDeposited; stillContains=$stillHasNests"
             )
             bot.delay(1)
@@ -194,7 +194,7 @@ class Banking(
                     nestsDeposited = true
                     fallbackAttempts++
                     stillHasNests = Backpack.contains(bot.birdNestPattern)
-                    bot.info(
+                    bot.debug(
                         "DepositBirdNests: fallback attempt $fallbackAttempts stillContains=$stillHasNests"
                     )
                     bot.delay(1)

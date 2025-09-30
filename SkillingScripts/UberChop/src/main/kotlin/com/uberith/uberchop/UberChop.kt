@@ -10,7 +10,6 @@ import com.uberith.uberchop.gui.UberChopGUI
 import com.uberith.uberchop.state.Banking
 import com.uberith.uberchop.state.BotState
 import com.uberith.uberchop.state.Chopping
-import com.uberith.api.utils.Statistics
 import net.botwithus.kxapi.game.inventory.Backpack
 import net.botwithus.kxapi.permissive.PermissiveDSL
 import net.botwithus.kxapi.permissive.PermissiveScript
@@ -45,6 +44,13 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
         private const val STAT_LOGS_KEY = "logs"
         private const val STAT_LOGS_PER_HOUR_KEY = "logsPerHour"
         private const val STAT_BIRD_NESTS_KEY = "birdNests"
+        private const val STAT_RUNTIME_KEY = "runtimeMs"
+        private const val STAT_XP_KEY = "xp"
+        private const val STAT_LEVELS_KEY = "levels"
+        private const val STAT_XP_PER_HOUR_KEY = "xpPerHour"
+        private const val STAT_NESTS_PER_HOUR_KEY = "nestsPerHour"
+        private const val RUNTIME_PERSIST_INTERVAL_MS = 60_000L
+        private const val LOGS_PER_HOUR_REFRESH_MS = 5_000L
     }
 
     /**
@@ -58,8 +64,24 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
     internal val logPattern = Pattern.compile(".*logs.*", Pattern.CASE_INSENSITIVE)
     internal val birdNestPattern = Pattern.compile(".*bird['\\u2019]?s nest.*", Pattern.CASE_INSENSITIVE)
     private val birdNestRegex = Regex("(?i).*bird['\\u2019]?s nest.*")
-    private val statistics = Statistics("UberChop")
     private val statsLock = Any()
+    private val statusLogger = LoggerFactory.getLogger("${UberChop::class.java.name}.status")
+    private var lifetimeLogs: Long = 0L
+    private var lifetimeBirdNests: Long = 0L
+    private var lifetimeRuntimeMs: Long = 0L
+    private var sessionRuntimeCommittedMs: Long = 0L
+    private var lifetimeWoodcuttingXp: Long = 0L
+    private var lifetimeWoodcuttingLevels: Long = 0L
+    private var startingWoodcuttingXp: Int = 0
+    private var startingWoodcuttingLevel: Int = 0
+    private var sessionWoodcuttingXpCommitted: Int = 0
+    private var sessionWoodcuttingLevelsCommitted: Int = 0
+    private var cachedLogsPerHour: Int = 0
+    private var nextLogsPerHourUpdateAt: Long = 0L
+    private var lastLogsPerHourLogs: Int = 0
+    private var cachedWoodcuttingXpPerHour: Int = 0
+    private var nextXpPerHourUpdateAt: Long = 0L
+    private var lastWoodcuttingXp: Int = 0
     val woodBoxPattern: Pattern = Pattern.compile(".*wood box.*", Pattern.CASE_INSENSITIVE)
     internal enum class LogHandling {
         BANK,
@@ -85,7 +107,12 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
 
     private var mode: BotState = BotState.CHOPPING
     private var statusText: String = "Starting up"
-    private var startTimeMs: Long = System.currentTimeMillis()
+    private var accumulatedRuntimeMs: Long = 0L
+    private var activeRuntimeStartMs: Long = 0L
+    private var nextRuntimePersistAt: Long = 0L
+    private var lastStatusLogMessage: String = ""
+    private var lastStatusLogAt: Long = 0L
+    private val statusLogCooldownMs: Long = 5_000L
     private var uiSettingsLoaded = false
     internal var chopWorkedLastTick = false
     private val stateInstances = mutableMapOf<BotState, PermissiveDSL<*>>()
@@ -126,8 +153,8 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
     }
 
     override fun onInitialize() {
+        configureLogging()
         super.onInitialize()
-        startTimeMs = System.currentTimeMillis()
         resetRuntimeStatistics()
         runCatching { gui.preload() }
 
@@ -149,13 +176,203 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
         switchState(initialState, reason)
     }
 
+    override fun onActivation() {
+        super.onActivation()
+        synchronized(statsLock) {
+            if (activeRuntimeStartMs == 0L) {
+                activeRuntimeStartMs = System.currentTimeMillis()
+                nextRuntimePersistAt = 0L
+            }
+        }
+    }
+
+    override fun onDeactivation() {
+        synchronized(statsLock) {
+            if (activeRuntimeStartMs != 0L) {
+                accumulatedRuntimeMs += System.currentTimeMillis() - activeRuntimeStartMs
+                activeRuntimeStartMs = 0L
+            }
+            nextRuntimePersistAt = 0L
+        }
+        persistStats()
+        super.onDeactivation()
+    }
+
     private fun resetRuntimeStatistics() {
         synchronized(statsLock) {
             logsChopped = 0
             birdNestsCollected = 0
-            statistics.saveStatistic(STAT_LOGS_KEY, logsChopped)
-            statistics.saveStatistic(STAT_LOGS_PER_HOUR_KEY, 0)
-            statistics.saveStatistic(STAT_BIRD_NESTS_KEY, birdNestsCollected)
+            accumulatedRuntimeMs = 0L
+            activeRuntimeStartMs = 0L
+            nextRuntimePersistAt = 0L
+            sessionRuntimeCommittedMs = 0L
+            startingWoodcuttingXp = Stats.WOODCUTTING.xp
+            startingWoodcuttingLevel = Stats.WOODCUTTING.level
+            sessionWoodcuttingXpCommitted = 0
+            sessionWoodcuttingLevelsCommitted = 0
+            cachedLogsPerHour = 0
+            nextLogsPerHourUpdateAt = 0L
+            lastLogsPerHourLogs = 0
+            cachedWoodcuttingXpPerHour = 0
+            nextXpPerHourUpdateAt = 0L
+            lastWoodcuttingXp = 0
+        }
+        persistStats()
+    }
+
+    private fun currentRuntimeMillis(): Long =
+        synchronized(statsLock) { currentRuntimeMillisLocked(System.currentTimeMillis()) }
+
+    private fun currentRuntimeMillisLocked(now: Long): Long {
+        val accumulated = accumulatedRuntimeMs
+        val activeStart = activeRuntimeStartMs
+        return if (activeStart != 0L) accumulated + (now - activeStart) else accumulated
+    }
+
+    private fun commitSessionTotals() {
+        val now = System.currentTimeMillis()
+        synchronized(statsLock) {
+            val sessionRuntime = currentRuntimeMillisLocked(now)
+            val runtimeDelta = sessionRuntime - sessionRuntimeCommittedMs
+            if (runtimeDelta > 0) {
+                lifetimeRuntimeMs += runtimeDelta
+                sessionRuntimeCommittedMs += runtimeDelta
+            }
+
+            val sessionXp = (Stats.WOODCUTTING.xp - startingWoodcuttingXp).coerceAtLeast(0)
+            val xpDelta = sessionXp - sessionWoodcuttingXpCommitted
+            if (xpDelta > 0) {
+                lifetimeWoodcuttingXp += xpDelta.toLong()
+                sessionWoodcuttingXpCommitted += xpDelta
+            }
+
+            val sessionLevels = (Stats.WOODCUTTING.level - startingWoodcuttingLevel).coerceAtLeast(0)
+            val levelDelta = sessionLevels - sessionWoodcuttingLevelsCommitted
+            if (levelDelta > 0) {
+                lifetimeWoodcuttingLevels += levelDelta.toLong()
+                sessionWoodcuttingLevelsCommitted += levelDelta
+            }
+        }
+    }
+
+    private fun calculatePerHour(count: Long, runtimeMs: Long): Int {
+        if (runtimeMs <= 0L) return 0
+        return ((count.toDouble() / runtimeMs.toDouble()) * 3_600_000.0).roundToInt()
+    }
+
+    fun logsPerHour(): Int {
+        val now = System.currentTimeMillis()
+        return synchronized(statsLock) {
+            val runtimeSnapshot = currentRuntimeMillisLocked(now)
+            if (runtimeSnapshot <= 0L) {
+                cachedLogsPerHour = 0
+                nextLogsPerHourUpdateAt = now + LOGS_PER_HOUR_REFRESH_MS
+                lastLogsPerHourLogs = logsChopped
+                return@synchronized 0
+            }
+
+            if (now >= nextLogsPerHourUpdateAt || logsChopped != lastLogsPerHourLogs) {
+                cachedLogsPerHour = calculatePerHour(logsChopped.toLong(), runtimeSnapshot)
+                nextLogsPerHourUpdateAt = now + LOGS_PER_HOUR_REFRESH_MS
+                lastLogsPerHourLogs = logsChopped
+            }
+            val currentXp = woodcuttingXpGained()
+            if (now >= nextXpPerHourUpdateAt || currentXp != lastWoodcuttingXp) {
+                cachedWoodcuttingXpPerHour = calculatePerHour(currentXp.toLong(), runtimeSnapshot)
+                nextXpPerHourUpdateAt = now + LOGS_PER_HOUR_REFRESH_MS
+                lastWoodcuttingXp = currentXp
+            }
+            cachedLogsPerHour
+        }
+    }
+
+    fun birdNestsPerHour(): Int {
+        val runtime = currentRuntimeMillis()
+        if (runtime <= 0L) return 0
+        return calculatePerHour(birdNestsCollected.toLong(), runtime)
+    }
+
+    fun woodcuttingXpGained(): Int =
+        (Stats.WOODCUTTING.xp - startingWoodcuttingXp).coerceAtLeast(0)
+
+    fun woodcuttingLevelsGained(): Int =
+        (Stats.WOODCUTTING.level - startingWoodcuttingLevel).coerceAtLeast(0)
+
+    fun woodcuttingXpPerHour(): Int = synchronized(statsLock) { cachedWoodcuttingXpPerHour }
+
+    fun lifetimeLogsPerHour(): Int = calculatePerHour(lifetimeLogs, lifetimeRuntimeMs)
+
+    fun lifetimeBirdNestsPerHour(): Int = calculatePerHour(lifetimeBirdNests, lifetimeRuntimeMs)
+
+    fun lifetimeWoodcuttingXpPerHour(): Int = calculatePerHour(lifetimeWoodcuttingXp, lifetimeRuntimeMs)
+
+    fun lifetimeWoodcuttingXpGained(): Long =
+        synchronized(statsLock) { lifetimeWoodcuttingXp }
+
+    fun lifetimeWoodcuttingLevelsGained(): Long =
+        synchronized(statsLock) { lifetimeWoodcuttingLevels }
+
+    fun lifetimeLogsChopped(): Long = synchronized(statsLock) { lifetimeLogs }
+
+    fun lifetimeBirdNestsCollected(): Long = synchronized(statsLock) { lifetimeBirdNests }
+
+    fun lifetimeRuntimeMillis(): Long = synchronized(statsLock) { lifetimeRuntimeMs }
+
+    private fun setLoggerLevel(loggerName: String, levelName: String) {
+        val logger = LoggerFactory.getLogger(loggerName)
+        try {
+            val levelClass = Class.forName("ch.qos.logback.classic.Level")
+            val toLevel = levelClass.getMethod("toLevel", String::class.java)
+            val levelInstance = toLevel.invoke(null, levelName)
+            val setLevel = logger.javaClass.getMethod("setLevel", levelClass)
+            setLevel.invoke(logger, levelInstance)
+        } catch (_: Throwable) {
+            // Logging backend not available or does not support dynamic level changes.
+        }
+    }
+
+    private fun configureLogging() {
+        setLoggerLevel(javaClass.name, "WARN")
+        setLoggerLevel("net.botwithus.xapi.script.permissive.Permissive", "WARN")
+        setLoggerLevel("${UberChop::class.java.name}.status", "INFO")
+    }
+
+    private fun logEvent(message: String) {
+        statusLogger.info(message)
+    }
+
+    private fun logStatus(message: String, force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        val shouldLog = force || message != lastStatusLogMessage || (now - lastStatusLogAt) >= statusLogCooldownMs
+        if (shouldLog) {
+            statusLogger.info(message)
+            lastStatusLogMessage = message
+            lastStatusLogAt = now
+        }
+    }
+
+    private fun persistStats() {
+        commitSessionTotals()
+        performSavePersistentData()
+    }
+
+    private fun maybePersistRuntime() {
+        commitSessionTotals()
+        logsPerHour()
+        val now = System.currentTimeMillis()
+        val shouldPersist = synchronized(statsLock) {
+            if (activeRuntimeStartMs == 0L) {
+                return@synchronized false
+            }
+            if (nextRuntimePersistAt == 0L || now >= nextRuntimePersistAt) {
+                nextRuntimePersistAt = now + RUNTIME_PERSIST_INTERVAL_MS
+                true
+            } else {
+                false
+            }
+        }
+        if (shouldPersist) {
+            persistStats()
         }
     }
 
@@ -163,33 +380,119 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
         if (!uiSettingsLoaded) {
             ensureUiSettingsLoaded()
         }
+        maybePersistRuntime()
 
         return super.onPreTick()
     }
 
-    override fun savePersistentData(container: JsonObject?) {
-        val target = container ?: return
-        target.add("settings", gson.toJsonTree(settings))
-        target.addProperty("targetTree", targetTree)
-        target.addProperty("location", location)
+override fun savePersistentData(container: JsonObject?) {
+    commitSessionTotals()
+    val target = container ?: return
+    val settingsObj = gson.toJsonTree(settings).asJsonObject
+    settingsObj.addProperty("targetTree", targetTree)
+    settingsObj.addProperty("location", location)
+    target.add("settings", settingsObj)
+
+    data class SessionSnapshot(
+        val logs: Int,
+        val nests: Int,
+        val runtimeMs: Long,
+        val xp: Int,
+        val levels: Int
+    )
+
+    data class LifetimeSnapshot(
+        val logs: Long,
+        val nests: Long,
+        val runtimeMs: Long,
+        val xp: Long,
+        val levels: Long
+    )
+
+    val now = System.currentTimeMillis()
+    val sessionSnapshot: SessionSnapshot
+    val lifetimeSnapshot: LifetimeSnapshot
+    synchronized(statsLock) {
+        val runtimeMs = currentRuntimeMillisLocked(now)
+        val sessionXp = (Stats.WOODCUTTING.xp - startingWoodcuttingXp).coerceAtLeast(0)
+        val sessionLevels = (Stats.WOODCUTTING.level - startingWoodcuttingLevel).coerceAtLeast(0)
+        sessionSnapshot = SessionSnapshot(
+            logsChopped,
+            birdNestsCollected,
+            runtimeMs,
+            sessionXp,
+            sessionLevels
+        )
+        lifetimeSnapshot = LifetimeSnapshot(
+            lifetimeLogs,
+            lifetimeBirdNests,
+            lifetimeRuntimeMs,
+            lifetimeWoodcuttingXp,
+            lifetimeWoodcuttingLevels
+        )
     }
+
+val sessionLogsPerHour = calculatePerHour(sessionSnapshot.logs.toLong(), sessionSnapshot.runtimeMs)
+val sessionNestsPerHour = calculatePerHour(sessionSnapshot.nests.toLong(), sessionSnapshot.runtimeMs)
+val sessionXpPerHour = calculatePerHour(sessionSnapshot.xp.toLong(), sessionSnapshot.runtimeMs)
+val lifetimeLogsPerHour = calculatePerHour(lifetimeSnapshot.logs, lifetimeSnapshot.runtimeMs)
+val lifetimeNestsPerHour = calculatePerHour(lifetimeSnapshot.nests, lifetimeSnapshot.runtimeMs)
+val lifetimeXpPerHour = calculatePerHour(lifetimeSnapshot.xp, lifetimeSnapshot.runtimeMs)
+
+val statsObject = JsonObject().apply {
+    add("session", JsonObject().apply {
+        addProperty(STAT_LOGS_KEY, sessionSnapshot.logs)
+        addProperty(STAT_LOGS_PER_HOUR_KEY, sessionLogsPerHour)
+        addProperty(STAT_NESTS_PER_HOUR_KEY, sessionNestsPerHour)
+        addProperty(STAT_XP_PER_HOUR_KEY, sessionXpPerHour)
+        addProperty(STAT_BIRD_NESTS_KEY, sessionSnapshot.nests)
+        addProperty(STAT_RUNTIME_KEY, sessionSnapshot.runtimeMs)
+        addProperty(STAT_XP_KEY, sessionSnapshot.xp)
+        addProperty(STAT_LEVELS_KEY, sessionSnapshot.levels)
+    })
+    add("overall", JsonObject().apply {
+        addProperty(STAT_LOGS_KEY, lifetimeSnapshot.logs)
+        addProperty(STAT_LOGS_PER_HOUR_KEY, lifetimeLogsPerHour)
+        addProperty(STAT_NESTS_PER_HOUR_KEY, lifetimeNestsPerHour)
+        addProperty(STAT_XP_PER_HOUR_KEY, lifetimeXpPerHour)
+        addProperty(STAT_BIRD_NESTS_KEY, lifetimeSnapshot.nests)
+        addProperty(STAT_RUNTIME_KEY, lifetimeSnapshot.runtimeMs)
+        addProperty(STAT_XP_KEY, lifetimeSnapshot.xp)
+        addProperty(STAT_LEVELS_KEY, lifetimeSnapshot.levels)
+    })
+}
+    target.add("stats", statsObject)
+}
 
     override fun loadPersistentData(container: JsonObject?) {
-        val source = container ?: return
-        source.getAsJsonObject("settings")?.let {
-            runCatching { gson.fromJson(it, Settings::class.java) }
-                .onSuccess { loaded -> settings = loaded }
-                .onFailure { error -> log.warn("Failed to deserialize settings", error) }
-        }
-        source.get("targetTree")?.asString?.let { targetTree = it }
-        source.get("location")?.asString?.let { location = it }
-
-        uiSettingsLoaded = false
+    val source = container ?: return
+    source.getAsJsonObject("settings")?.let {
+        runCatching { gson.fromJson(it, Settings::class.java) }
+            .onSuccess { loaded -> settings = loaded }
+            .onFailure { error -> log.warn("Failed to deserialize settings", error) }
     }
+
+    source.get("targetTree")?.asString?.let { targetTree = it }
+    source.get("location")?.asString?.let { location = it }
+
+    source.getAsJsonObject("stats")?.let { stats ->
+        val overall = stats.getAsJsonObject("overall") ?: stats
+        synchronized(statsLock) {
+            lifetimeLogs = overall.get(STAT_LOGS_KEY)?.asLong ?: lifetimeLogs
+            lifetimeBirdNests = overall.get(STAT_BIRD_NESTS_KEY)?.asLong ?: lifetimeBirdNests
+            lifetimeRuntimeMs = overall.get(STAT_RUNTIME_KEY)?.asLong ?: lifetimeRuntimeMs
+            lifetimeWoodcuttingXp = overall.get(STAT_XP_KEY)?.asLong ?: lifetimeWoodcuttingXp
+            lifetimeWoodcuttingLevels = overall.get(STAT_LEVELS_KEY)?.asLong ?: lifetimeWoodcuttingLevels
+        }
+    }
+
+    uiSettingsLoaded = false
+}
 
     fun updateStatus(text: String) {
         statusText = text
         setStatus(text)
+        logStatus("Status: $text")
     }
 
     fun switchState(next: BotState, reason: String) {
@@ -207,7 +510,7 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
         setCurrentState(stateName)
         mode = next
         chopWorkedLastTick = false
-        info("Now ${next.description.lowercase()}: $reason")
+        logEvent("State -> ${next.description}: $reason")
         updateStatus("${next.description}: $reason")
     }
 
@@ -334,7 +637,7 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
     }
 
     @EventInfo(type = InventoryEvent::class)
-    private fun onInventoryEvent(event: InventoryEvent) {
+    fun onInventoryEvent(event: InventoryEvent) {
         if (event.inventory.id != BACKPACK_INVENTORY_ID) {
             return
         }
@@ -354,34 +657,31 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
             return
         }
 
+        var statsChanged = false
         synchronized(statsLock) {
             if (isLog) {
                 logsChopped += quantityAdded
-                statistics.saveStatistic(STAT_LOGS_KEY, logsChopped)
-                statistics.saveStatistic(STAT_LOGS_PER_HOUR_KEY, logsPerHour())
+                lifetimeLogs += quantityAdded
+                statsChanged = true
             }
             if (isBirdNest) {
                 birdNestsCollected += quantityAdded
-                statistics.saveStatistic(STAT_BIRD_NESTS_KEY, birdNestsCollected)
+                lifetimeBirdNests += quantityAdded
+                statsChanged = true
             }
+        }
+        if (statsChanged) {
+            persistStats()
         }
     }
 
     fun formattedRuntime(): String {
-        val elapsed = System.currentTimeMillis() - startTimeMs
-        val totalSeconds = (elapsed / 1000).coerceAtLeast(0)
+        val elapsed = currentRuntimeMillis().coerceAtLeast(0L)
+        val totalSeconds = elapsed / 1000
         val hours = totalSeconds / 3600
         val minutes = (totalSeconds % 3600) / 60
         val seconds = totalSeconds % 60
         return String.format("%02d:%02d:%02d", hours, minutes, seconds)
-    }
-
-    fun logsPerHour(): Int {
-        val elapsed = System.currentTimeMillis() - startTimeMs
-        if (elapsed <= 0) return 0
-        val hours = elapsed / 3_600_000.0
-        if (hours <= 0.0) return 0
-        return (logsChopped / hours).roundToInt()
     }
 
     fun ensureUiSettingsLoaded() {

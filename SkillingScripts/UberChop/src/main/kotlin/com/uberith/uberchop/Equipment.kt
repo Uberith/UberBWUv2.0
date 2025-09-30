@@ -28,15 +28,15 @@ object Equipment {
         withdraw: Boolean = true
     ): Boolean {
         if (hasWoodBox(pattern)) {
-            logger.info("[Equipment] Wood box already present in backpack")
+            logger.debug("[Equipment] Wood box already present in backpack")
             return false
         }
         if (!withdraw) {
-            logger.info("[Equipment] Withdraw disabled; skipping wood box retrieval")
+            logger.debug("[Equipment] Withdraw disabled; skipping wood box retrieval")
             return false
         }
         val withdrew = Bank.withdraw(pattern, 1)
-        logger.info("[Equipment] Bank.withdraw(pattern) -> {}", withdrew)
+        logger.debug("[Equipment] Bank.withdraw(pattern) -> {}", withdrew)
         if (withdrew) {
         }
         return withdrew
@@ -49,11 +49,11 @@ object Equipment {
     ): Boolean {
         val box = findWoodBox(pattern)
         if (box == null) {
-            logger.info("[Equipment] No wood box found to fill")
+            logger.debug("[Equipment] No wood box found to fill")
             return false
         }
         val interacted = Backpack.interact(box, option)
-        logger.info("[Equipment] Backpack.interact('{}') -> {}", option, interacted)
+        logger.debug("[Equipment] Backpack.interact('{}') -> {}", option, interacted)
         if (interacted) {
         }
         return interacted
@@ -66,15 +66,15 @@ object Equipment {
     ): Boolean {
         val box = findWoodBox(pattern)
         if (box == null) {
-            logger.info("[Equipment] No wood box found to empty")
+            logger.debug("[Equipment] No wood box found to empty")
             return false
         }
         if (!Bank.isOpen()) {
-            logger.info("[Equipment] Bank must be open to empty the wood box")
+            logger.debug("[Equipment] Bank must be open to empty the wood box")
             return false
         }
         val interacted = Backpack.interact(box, option)
-        logger.info("[Equipment] Backpack.interact('{}') -> {}", option, interacted)
+        logger.debug("[Equipment] Backpack.interact('{}') -> {}", option, interacted)
         if (interacted) {
             script.info("Emptying wood box contents into bank")
         }

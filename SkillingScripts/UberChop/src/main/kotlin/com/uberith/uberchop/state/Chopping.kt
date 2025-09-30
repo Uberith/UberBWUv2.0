@@ -125,6 +125,7 @@ class Chopping(
 
         // Hand control to the banking state when the inventory is capped.
         leaf(LeafName("HandleFullBackpack")) {
+            var waitedAfterFill = false
             if (bot.shouldUseWoodBox && Equipment.hasWoodBox()) {
                 bot.updateStatus("Filling wood box")
                 val filled = runCatching { Equipment.fillWoodBox(bot) }
@@ -133,17 +134,31 @@ class Chopping(
 
                 if (filled) {
                     bot.chopWorkedLastTick = false
-                    if (!Backpack.isFull()) {
-                        bot.info("HandleFullBackpack: wood box filled and backpack freed space")
-                        return@leaf
+                    repeat(3) { attempt ->
+                        bot.delay(1)
+                        waitedAfterFill = true
+                        if (!Backpack.isFull()) {
+                            bot.debug("HandleFullBackpack: wood box fill freed space after ${attempt + 1} tick(s)")
+                            return@leaf
+                        }
                     }
-                    bot.warn("HandleFullBackpack: wood box filled but backpack remains full")
+                    bot.warn("HandleFullBackpack: wood box filled but backpack remains full after waits")
                 }
             }
-            bot.delay(1)
+
             if (!Backpack.isFull()) {
-                bot.switchState(BotState.CHOPPING, "Backpack had space after wood box fill")
+                bot.switchState(BotState.CHOPPING, "Backpack had space after wood box handling")
                 return@leaf
+            }
+
+            if (!waitedAfterFill) {
+                repeat(2) {
+                    bot.delay(1)
+                    if (!Backpack.isFull()) {
+                        bot.switchState(BotState.CHOPPING, "Backpack space freed after wait")
+                        return@leaf
+                    }
+                }
             }
 
             bot.switchState(BotState.BANKING, "Backpack is full")
