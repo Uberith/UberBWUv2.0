@@ -10,8 +10,12 @@ import com.uberith.uberchop.gui.UberChopGUI
 import com.uberith.uberchop.state.Banking
 import com.uberith.uberchop.state.BotState
 import com.uberith.uberchop.state.Chopping
+import com.uberith.uberchop.state.Fletching
 import net.botwithus.kxapi.game.inventory.Backpack
 import net.botwithus.kxapi.game.inventory.Bank
+import net.botwithus.kxapi.game.skilling.impl.fletching.FletchingProduct
+import net.botwithus.kxapi.game.skilling.impl.fletching.fletching
+import net.botwithus.kxapi.game.skilling.skilling
 import net.botwithus.kxapi.permissive.PermissiveDSL
 import net.botwithus.kxapi.permissive.PermissiveScript
 import net.botwithus.events.EventInfo
@@ -113,6 +117,7 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
     private var nextWoodBoxWithdrawTimeMs: Long = 0L
     internal var woodBoxWithdrawAttempted = false
     internal var woodBoxWithdrawSucceeded = false
+    private var nextFletchAttemptAllowedAt: Long = 0L
     private var jujuEffectExpiresAt: Long = 0L
     private var lastJujuDrinkAttemptAt: Long = 0L
     private var jujuWithdrawRetryAt: Long = 0L
@@ -186,11 +191,15 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
             return
         }
 
-        val initialState = if (Backpack.isFull()) BotState.BANKING else BotState.CHOPPING
-        val reason = if (initialState == BotState.BANKING) {
-            "Initialized with full backpack"
-        } else {
-            "Initialized"
+        val initialState = when {
+            Backpack.isFull() && logHandlingPreference == LogHandling.FLETCH && hasFletchableLogs() -> BotState.FLETCHING
+            Backpack.isFull() -> BotState.BANKING
+            else -> BotState.CHOPPING
+        }
+        val reason = when (initialState) {
+            BotState.FLETCHING -> "Initialized with full backpack; fletching logs"
+            BotState.BANKING -> "Initialized with full backpack"
+            else -> "Initialized"
         }
 
         switchState(initialState, reason)
@@ -242,6 +251,7 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
             nextXpPerHourUpdateAt = 0L
             lastWoodcuttingXp = 0
         }
+        nextFletchAttemptAllowedAt = 0L
         persistStats()
     }
 
@@ -580,6 +590,7 @@ val statsObject = JsonObject().apply {
     private fun instantiateState(state: BotState): PermissiveDSL<*>? = when (state) {
         BotState.CHOPPING -> Chopping(this)
         BotState.BANKING -> Banking(this)
+        BotState.FLETCHING -> Fletching(this)
     }
 
     internal fun depositItemsFallback(
@@ -607,6 +618,111 @@ val statsObject = JsonObject().apply {
 
     internal fun depositLogsFallback(maxIterations: Int = 10): Boolean =
         depositItemsFallback(logPattern, maxIterations)
+
+    internal fun hasFletchableLogs(): Boolean {
+        if (logHandlingPreference != LogHandling.FLETCH) {
+            return false
+        }
+        val logItem = Backpack.getItems().firstOrNull { logPattern.matcher(it.name).matches() } ?: return false
+        return resolveFletchingProduct(logItem) != null
+    }
+
+    private fun resolveFletchingProduct(logItem: InventoryItem): FletchingProduct? {
+        val itemName = logItem.name
+
+        val primaryMatch = FletchingProduct.entries.firstOrNull { product ->
+            val primary = product.primaryMaterial
+            primary != null && primary.equals(itemName, ignoreCase = true)
+        }
+        if (primaryMatch != null) {
+            return primaryMatch
+        }
+
+        val displayMatch = FletchingProduct.entries.firstOrNull { product ->
+            product.displayName.equals(itemName, ignoreCase = true)
+        }
+        if (displayMatch != null) {
+            return displayMatch
+        }
+
+        if (itemName.equals("Logs", ignoreCase = true) || itemName.equals("Normal logs", ignoreCase = true)) {
+            return FletchingProduct.ARROW_SHAFTS
+        }
+
+        val keyword = itemName.lowercase().substringBefore(" logs").trim()
+        if (keyword.isNotEmpty()) {
+            val partial = FletchingProduct.entries.firstOrNull { product ->
+                val primary = product.primaryMaterial
+                primary != null && primary.lowercase().contains(keyword)
+            }
+            if (partial != null) {
+                return partial
+            }
+        }
+
+        return null
+    }
+
+    internal fun attemptFletchLogs(): Boolean {
+        val now = System.currentTimeMillis()
+        if (now < nextFletchAttemptAllowedAt) {
+            return false
+        }
+
+        val logItem = Backpack.getItems().firstOrNull { logPattern.matcher(it.name).matches() } ?: return false
+        val product = resolveFletchingProduct(logItem) ?: run {
+            warn("Fletching: no recipe resolves for ${logItem.name}")
+            nextFletchAttemptAllowedAt = now + 2_000L
+            return false
+        }
+
+        val canProduce = try {
+            skilling.fletching.canProduce(product)
+        } catch (error: Throwable) {
+            warn("Fletching: canProduce failed for ${product.displayName}: ${error.message}")
+            false
+        }
+        if (!canProduce) {
+            warn("Fletching: requirements not met for ${product.displayName}")
+            nextFletchAttemptAllowedAt = now + 5_000L
+            return false
+        }
+
+        val manager = try {
+            skilling.fletching.produce(product)
+        } catch (error: Throwable) {
+            warn("Fletching: produce failed for ${product.displayName}: ${error.message}")
+            return false
+        }
+
+        val started = try {
+            val managerClass = manager.javaClass
+            val method = managerClass.methods.firstOrNull { method ->
+                method.parameterCount == 0 && method.name.equals("all", ignoreCase = true)
+            } ?: managerClass.methods.firstOrNull { method ->
+                method.parameterCount == 0 && method.name.equals("startAll", ignoreCase = true)
+            }
+            val result = method?.let { invoke ->
+                invoke.isAccessible = true
+                invoke.invoke(manager)
+            }
+            when (result) {
+                is Boolean -> result
+                is Number -> result.toInt() != 0
+                else -> result != null
+            }
+        } catch (error: Throwable) {
+            warn("Fletching: unable to start production for ${product.displayName}: ${error.message}")
+            false
+        }
+
+        nextFletchAttemptAllowedAt = now + if (started) 1_000L else 2_000L
+        if (started) {
+            updateStatus("Fletching ${product.displayName}")
+            chopWorkedLastTick = false
+        }
+        return started
+    }
 
     internal fun hasJujuPotionInBackpack(): Boolean =
         Backpack.getItems().any { jujuPotionPattern.matcher(it.name).matches() }
@@ -1004,4 +1120,5 @@ val statsObject = JsonObject().apply {
     private fun toCoordinate(x: Int?, y: Int?, z: Int?): Coordinate? =
         if (x != null && y != null && z != null) Coordinate(x, y, z) else null
 }
+
 

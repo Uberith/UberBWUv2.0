@@ -177,6 +177,17 @@ class Chopping(
                 }
             }
 
+            if (bot.logHandlingPreference == UberChop.LogHandling.FLETCH) {
+                if (bot.hasFletchableLogs()) {
+                    bot.switchState(BotState.FLETCHING, "Backpack is full")
+                } else {
+                    bot.warn("HandleFullBackpack: log handling set to fletch but no recipe was found")
+                    bot.updateStatus("Fletching unavailable for current logs")
+                    bot.delay(1)
+                }
+                return@leaf
+            }
+
             bot.switchState(BotState.BANKING, "Backpack is full")
         }
 
