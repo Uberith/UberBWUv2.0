@@ -23,9 +23,11 @@ class Banking(
                 !Equipment.hasWoodBox() ||
                     (bot.woodBoxWithdrawAttempted && !bot.woodBoxWithdrawSucceeded)
             )
+            val needsJuju = bot.needsJujuRestock()
             Backpack.contains(bot.logPattern) ||
                 (bot.settings.pickupNests && Backpack.contains(bot.birdNestPattern)) ||
-                needsWoodBox
+                needsWoodBox ||
+                needsJuju
         }) {
             onSuccess(BranchName("BankIsOpen"))
             onFailure(LeafName("SwitchToChopping"))
@@ -98,6 +100,19 @@ class Banking(
             bot.settings.pickupNests && Backpack.contains(bot.birdNestPattern)
         }) {
             onSuccess(LeafName("DepositBirdNests"))
+            onFailure(BranchName("ShouldDepositJujuVials"))
+        }
+        branch(BranchName("ShouldDepositJujuVials"), condition = {
+            bot.shouldDepositJujuVials()
+        }) {
+            onSuccess(LeafName("DepositJujuVials"))
+            onFailure(BranchName("ShouldWithdrawJujuPotions"))
+        }
+
+        branch(BranchName("ShouldWithdrawJujuPotions"), condition = {
+            bot.shouldRestockJujuPotions()
+        }) {
+            onSuccess(LeafName("WithdrawJujuPotions"))
             onFailure(BranchName("ShouldWithdrawWoodBox"))
         }
 
@@ -211,6 +226,54 @@ class Banking(
             bot.chopWorkedLastTick = false
         }
 
+        leaf(LeafName("DepositJujuVials")) {
+            if (!bot.settings.useJujuPotions) {
+                return@leaf
+            }
+            if (!Backpack.contains(bot.jujuVialPattern)) {
+                return@leaf
+            }
+
+            bot.updateStatus("Depositing juju vials")
+            var deposited = runCatching { Bank.depositAll(bot, bot.jujuVialPattern) }
+                .onFailure { error -> bot.warn("DepositJujuVials: depositAll threw ${error.message}") }
+                .getOrElse { false }
+            var stillHasVials = Backpack.contains(bot.jujuVialPattern)
+            if (!deposited && stillHasVials) {
+                deposited = bot.depositItemsFallback(bot.jujuVialPattern)
+                stillHasVials = Backpack.contains(bot.jujuVialPattern)
+            }
+            if (stillHasVials) {
+                bot.warn("DepositJujuVials: backpack still has juju vials after attempts")
+            }
+            if (deposited) {
+                bot.delay(1)
+            }
+            bot.chopWorkedLastTick = false
+        }
+
+
+        leaf(LeafName("WithdrawJujuPotions")) {
+            if (!bot.settings.useJujuPotions) {
+                return@leaf
+            }
+            if (!bot.shouldRestockJujuPotions()) {
+                return@leaf
+            }
+            if (Backpack.isFull()) {
+                bot.warn("WithdrawJujuPotions: backpack full; cannot withdraw juju potion")
+                return@leaf
+            }
+
+            bot.updateStatus("Withdrawing juju potions")
+            val withdrew = bot.attemptJujuWithdraw()
+            if (!withdrew) {
+                bot.warn("WithdrawJujuPotions: failed to withdraw juju potions from bank")
+            } else {
+                bot.delay(1)
+            }
+            bot.chopWorkedLastTick = false
+        }
         leaf(LeafName("WithdrawWoodBox")) {
             if (!bot.shouldUseWoodBox) {
                 return@leaf
@@ -257,7 +320,10 @@ class Banking(
                 bot.debug("SwitchToChopping: still waiting for wood box")
                 return@leaf
             }
-
+            if (bot.shouldStayAtBankForJuju()) {
+                bot.debug("SwitchToChopping: waiting for juju potions")
+                return@leaf
+            }
             if (Bank.isOpen()) {
                 bot.updateStatus("Closing bank")
                 runCatching { Bank.close() }

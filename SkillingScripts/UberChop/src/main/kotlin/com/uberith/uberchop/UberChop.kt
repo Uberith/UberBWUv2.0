@@ -11,12 +11,14 @@ import com.uberith.uberchop.state.Banking
 import com.uberith.uberchop.state.BotState
 import com.uberith.uberchop.state.Chopping
 import net.botwithus.kxapi.game.inventory.Backpack
+import net.botwithus.kxapi.game.inventory.Bank
 import net.botwithus.kxapi.permissive.PermissiveDSL
 import net.botwithus.kxapi.permissive.PermissiveScript
 import net.botwithus.events.EventInfo
 import net.botwithus.rs3.inventories.events.InventoryEvent
 import net.botwithus.rs3.item.InventoryItem
 import net.botwithus.rs3.stats.Stats
+import net.botwithus.rs3.vars.VarDomain
 import net.botwithus.rs3.world.Coordinate
 import net.botwithus.scripts.Info
 import net.botwithus.ui.workspace.Workspace
@@ -51,6 +53,10 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
         private const val STAT_NESTS_PER_HOUR_KEY = "nestsPerHour"
         private const val RUNTIME_PERSIST_INTERVAL_MS = 60_000L
         private const val LOGS_PER_HOUR_REFRESH_MS = 5_000L
+        private const val JUJU_EFFECT_DURATION_MS = 360_000L
+        private const val JUJU_WITHDRAW_COUNT = 5
+        private const val JUJU_WITHDRAW_RETRY_MS = 10_000L
+        private val JUJU_EFFECT_VARBITS = intArrayOf(4394, 4395, 4396)
     }
 
     /**
@@ -64,6 +70,9 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
     internal val logPattern = Pattern.compile(".*logs.*", Pattern.CASE_INSENSITIVE)
     internal val birdNestPattern = Pattern.compile(".*bird['\\u2019]?s nest.*", Pattern.CASE_INSENSITIVE)
     private val birdNestRegex = Regex("(?i).*bird['\\u2019]?s nest.*")
+    internal val jujuPotionPattern =
+        Pattern.compile(".*(?:perfect\\s+)?juju\\s+woodcutting\\s+potion.*", Pattern.CASE_INSENSITIVE)
+    internal val jujuVialPattern = Pattern.compile(".*juju\\s+vial.*", Pattern.CASE_INSENSITIVE)
     private val statsLock = Any()
     private val statusLogger = LoggerFactory.getLogger("${UberChop::class.java.name}.status")
     private var lifetimeLogs: Long = 0L
@@ -104,6 +113,17 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
     private var nextWoodBoxWithdrawTimeMs: Long = 0L
     internal var woodBoxWithdrawAttempted = false
     internal var woodBoxWithdrawSucceeded = false
+    private var jujuEffectExpiresAt: Long = 0L
+    private var lastJujuDrinkAttemptAt: Long = 0L
+    private var jujuWithdrawRetryAt: Long = 0L
+    private enum class JujuRestockMode {
+        IDLE,
+        REQUIRED,
+        IGNORED
+    }
+
+    private var jujuRestockMode: JujuRestockMode = JujuRestockMode.IDLE
+    private var jujuRestockInitialized = false
 
     private var mode: BotState = BotState.CHOPPING
     private var statusText: String = "Starting up"
@@ -177,6 +197,11 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
     }
 
     override fun onActivation() {
+        jujuRestockInitialized = false
+        jujuRestockMode = JujuRestockMode.IDLE
+        jujuWithdrawRetryAt = 0L
+        jujuEffectExpiresAt = 0L
+        lastJujuDrinkAttemptAt = 0L
         super.onActivation()
         synchronized(statsLock) {
             if (activeRuntimeStartMs == 0L) {
@@ -380,6 +405,7 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
         if (!uiSettingsLoaded) {
             ensureUiSettingsLoaded()
         }
+        ensureJujuRestockBootstrap()
         maybePersistRuntime()
 
         return super.onPreTick()
@@ -582,6 +608,193 @@ val statsObject = JsonObject().apply {
     internal fun depositLogsFallback(maxIterations: Int = 10): Boolean =
         depositItemsFallback(logPattern, maxIterations)
 
+    internal fun hasJujuPotionInBackpack(): Boolean =
+        Backpack.getItems().any { jujuPotionPattern.matcher(it.name).matches() }
+
+    private fun ensureJujuRestockBootstrap() {
+        if (jujuRestockInitialized) {
+            if (!settings.useJujuPotions) {
+                jujuRestockMode = JujuRestockMode.IDLE
+            }
+            return
+        }
+        if (!settings.useJujuPotions) {
+            jujuRestockMode = JujuRestockMode.IDLE
+            jujuRestockInitialized = true
+            return
+        }
+
+        jujuRestockInitialized = true
+        if (hasJujuPotionInBackpack()) {
+            jujuRestockMode = JujuRestockMode.IDLE
+        } else {
+            jujuRestockMode = JujuRestockMode.REQUIRED
+            log.debug("Juju restock: no potions in backpack; requesting bank visit")
+        }
+    }
+
+    private fun requireJujuRestock(reason: String? = null) {
+        if (!settings.useJujuPotions || jujuRestockMode == JujuRestockMode.IGNORED) {
+            return
+        }
+        if (jujuRestockMode != JujuRestockMode.REQUIRED) {
+            jujuRestockMode = JujuRestockMode.REQUIRED
+            jujuWithdrawRetryAt = 0L
+        }
+        reason?.let { log.debug("Juju restock requested: $it") }
+    }
+
+    private fun markJujuUnavailable() {
+        if (jujuRestockMode != JujuRestockMode.IGNORED) {
+            jujuRestockMode = JujuRestockMode.IGNORED
+            log.warn("No juju woodcutting potions available in bank; continuing without juju support")
+        }
+    }
+
+    private fun bankContainsJujuPotion(): Boolean? = runCatching {
+        val methods = Bank::class.java.methods
+        val contains = methods.firstOrNull { method ->
+            method.name == "contains" && method.parameterTypes.size == 1 &&
+                Pattern::class.java.isAssignableFrom(method.parameterTypes[0])
+        }
+        if (contains != null) {
+            contains.isAccessible = true
+            val result = contains.invoke(null, jujuPotionPattern) as? Boolean
+            if (result != null) {
+                return@runCatching result
+            }
+        }
+
+        val itemsMethod = methods.firstOrNull { method ->
+            method.parameterTypes.isEmpty() && (method.name == "getItems" || method.name == "items")
+        } ?: return@runCatching null
+        itemsMethod.isAccessible = true
+        val itemsResult = itemsMethod.invoke(null)
+        val iterable = when (itemsResult) {
+            is Collection<*> -> itemsResult
+            is Array<*> -> itemsResult.asList()
+            else -> return@runCatching null
+        }
+        for (entry in iterable) {
+            val name = runCatching {
+                val nameMethod = entry?.javaClass?.methods?.firstOrNull { method ->
+                    method.name == "getName" && method.parameterTypes.isEmpty()
+                }
+                nameMethod?.isAccessible = true
+                nameMethod?.invoke(entry) as? String
+            }.getOrNull()
+            if (name != null && jujuPotionPattern.matcher(name).matches()) {
+                return@runCatching true
+            }
+        }
+        false
+    }.getOrNull()
+
+    internal fun needsJujuRestock(): Boolean =
+        settings.useJujuPotions && jujuRestockMode == JujuRestockMode.REQUIRED && !hasJujuPotionInBackpack()
+
+    internal fun shouldStayAtBankForJuju(): Boolean = needsJujuRestock()
+
+    internal fun shouldDepositJujuVials(): Boolean =
+        settings.useJujuPotions && Backpack.contains(jujuVialPattern)
+
+    internal fun shouldRestockJujuPotions(): Boolean {
+        if (!needsJujuRestock()) {
+            if (settings.useJujuPotions && jujuRestockMode == JujuRestockMode.REQUIRED && hasJujuPotionInBackpack()) {
+                jujuRestockMode = JujuRestockMode.IDLE
+                jujuWithdrawRetryAt = 0L
+            }
+            return false
+        }
+        if (Backpack.isFull()) {
+            return false
+        }
+        return System.currentTimeMillis() >= jujuWithdrawRetryAt
+    }
+
+    internal fun attemptJujuWithdraw(): Boolean {
+        val now = System.currentTimeMillis()
+        if (now < jujuWithdrawRetryAt) {
+            return false
+        }
+        val bankHas = bankContainsJujuPotion()
+        if (bankHas == false && !hasJujuPotionInBackpack()) {
+            markJujuUnavailable()
+            jujuWithdrawRetryAt = 0L
+            return false
+        }
+
+        val withdrew = runCatching { Bank.withdraw(jujuPotionPattern, JUJU_WITHDRAW_COUNT) }
+            .onFailure { error -> log.warn("AttemptJujuWithdraw: withdraw threw ${error.message}") }
+            .getOrDefault(false)
+
+        if (hasJujuPotionInBackpack()) {
+            jujuRestockMode = JujuRestockMode.IDLE
+            jujuWithdrawRetryAt = 0L
+            return true
+        }
+
+        if (bankHas == false) {
+            markJujuUnavailable()
+            jujuWithdrawRetryAt = 0L
+        } else if (!withdrew) {
+            jujuWithdrawRetryAt = now + JUJU_WITHDRAW_RETRY_MS
+        }
+        return withdrew
+    }
+
+    internal fun shouldDrinkJujuPotion(): Boolean {
+        if (!settings.useJujuPotions) {
+            return false
+        }
+        if (isJujuEffectActive()) {
+            return false
+        }
+        if (!hasJujuPotionInBackpack()) {
+            requireJujuRestock("Backpack has no juju potions while effect inactive")
+            return false
+        }
+        val now = System.currentTimeMillis()
+        return now - lastJujuDrinkAttemptAt >= 1_000L
+    }
+
+    internal fun drinkJujuPotion(): Boolean {
+        val potion = Backpack.getItems().firstOrNull { jujuPotionPattern.matcher(it.name).matches() }
+            ?: run {
+                requireJujuRestock("Attempted to drink juju potion but none found in backpack")
+                return false
+            }
+        lastJujuDrinkAttemptAt = System.currentTimeMillis()
+        val drank = Backpack.interact(potion, "Drink") || Backpack.interact(potion, "Sip")
+        if (drank) {
+            jujuEffectExpiresAt = System.currentTimeMillis() + JUJU_EFFECT_DURATION_MS
+            log.debug("DrinkJujuPotion: consumed ${potion.name}")
+            delay(1)
+        } else {
+            log.warn("DrinkJujuPotion: failed to interact with ${potion.name}")
+            requireJujuRestock("Failed to interact with juju potion ${potion.name}")
+        }
+        return drank
+    }
+
+    internal fun isJujuEffectActive(): Boolean {
+        val now = System.currentTimeMillis()
+        if (now < jujuEffectExpiresAt) {
+            return true
+        }
+        for (varbit in JUJU_EFFECT_VARBITS) {
+            val value = runCatching { VarDomain.getVarBitValue(varbit) }
+                .onFailure { error -> log.debug("isJujuEffectActive: varbit $varbit read failed: ${error.message}") }
+                .getOrNull()
+            if (value != null && value != 0) {
+                jujuEffectExpiresAt = now + JUJU_EFFECT_DURATION_MS
+                return true
+            }
+        }
+        return false
+    }
+
+
     internal fun canAttemptWoodBoxWithdraw(): Boolean =
         System.currentTimeMillis() >= nextWoodBoxWithdrawTimeMs
 
@@ -694,6 +907,11 @@ val statsObject = JsonObject().apply {
     }
 
     fun onSettingsChanged() {
+        jujuRestockInitialized = false
+        if (!settings.useJujuPotions) {
+            jujuRestockMode = JujuRestockMode.IDLE
+        }
+        jujuWithdrawRetryAt = 0L
         applyLocationSelection()
         uiSettingsLoaded = true
         performSavePersistentData()

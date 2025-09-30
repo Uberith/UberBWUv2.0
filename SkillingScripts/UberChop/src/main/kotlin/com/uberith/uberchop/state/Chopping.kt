@@ -29,6 +29,13 @@ class Chopping(
         // Stop swinging when the pack is full so the banking tree can take over.
         branch(BranchName("BackpackIsFull"), condition = { Backpack.isFull() }) {
             onSuccess(LeafName("HandleFullBackpack"))
+            onFailure(BranchName("NeedsJujuPotion"))
+        }
+
+        branch(BranchName("NeedsJujuPotion"), condition = {
+            bot.shouldDrinkJujuPotion()
+        }) {
+            onSuccess(LeafName("DrinkJujuPotion"))
             onFailure(BranchName("ShouldPickupNest"))
         }
 
@@ -76,6 +83,15 @@ class Chopping(
             }
         }
 
+
+        leaf(LeafName("DrinkJujuPotion")) {
+            bot.updateStatus("Drinking juju potion")
+            val drank = bot.drinkJujuPotion()
+            if (!drank) {
+                bot.debug("DrinkJujuPotion leaf: no usable juju potion found")
+            }
+            bot.chopWorkedLastTick = false
+        }
         leaf(LeafName("PickupBirdNest")) {
             bot.updateStatus("Collecting bird's nest")
             val pickedUp = bot.pickupBirdNests()
