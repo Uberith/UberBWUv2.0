@@ -6,6 +6,7 @@ import com.uberith.uberchop.config.Settings
 import com.uberith.uberchop.config.TreeLocation
 import com.uberith.uberchop.config.TreeLocations
 import com.uberith.uberchop.config.TreeTypes
+import com.uberith.uberchop.config.QueueEntry
 import com.uberith.uberchop.gui.UberChopGUI
 import com.uberith.uberchop.state.Banking
 import com.uberith.uberchop.state.BotState
@@ -31,6 +32,7 @@ import net.botwithus.rs3.world.World
 import net.botwithus.kxapi.game.scene.groundItem.PickupMessages
 import net.botwithus.kxapi.game.scene.groundItem.PickupItemPriority
 import net.botwithus.kxapi.game.scene.scene
+import botwithus.navigation.api.State as NavState
 import org.slf4j.LoggerFactory
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.regex.Pattern
@@ -112,6 +114,10 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
         get() = settings.withdrawWoodBox && logHandlingPreference == LogHandling.BANK
     // Simple guard to avoid spamming movement requests while one is "in flight".
     internal val movementGate = AtomicBoolean(false)
+    private val navigationCooldownMs = 1_000L
+    private val navigationInProgressRetryMs = 3_000L
+    private val navigationFailureRetryMs = 2_000L
+    private var nextNavigationAllowedAt: Long = 0L
     private val gui by lazy { UberChopGUI(this) }
     private val woodBoxRetryCooldownMs = 30_000L
     private var nextWoodBoxWithdrawTimeMs: Long = 0L
@@ -142,6 +148,11 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
     internal var chopWorkedLastTick = false
     private val stateInstances = mutableMapOf<BotState, PermissiveDSL<*>>()
     private var statesInitialized = false
+    private val queueLock = Any()
+    private var queueActiveEntryIndex: Int = -1
+    private var pendingQueueStop = false
+    private var lastQueueStatusAt: Long = 0L
+    private val queueStatusThrottleMs: Long = 2_000L
     var settings: Settings = Settings()
     var targetTree: String = "Tree"
     var location: String = ""
@@ -159,6 +170,396 @@ class UberChop : PermissiveScript<BotState>(debug = false) {
     val currentStatus: String
         get() = statusText
 
+    data class QueueProgress(
+        val index: Int,
+        val total: Int,
+        val treeName: String,
+        val location: String,
+        val remaining: Int,
+        val goal: Int
+    )
+
+    data class QueueEntrySnapshot(
+        val treeName: String,
+        val location: String,
+        val logHandlingMode: Int,
+        val goal: Int,
+        val remaining: Int
+    )
+
+    data class QueueSnapshot(
+        val entries: List<QueueEntrySnapshot>,
+        val activeIndex: Int,
+        val enabled: Boolean
+    )
+
+    private fun queueEntries(): MutableList<QueueEntry> = settings.queueEntries
+
+    fun queueSnapshot(): QueueSnapshot = synchronized(queueLock) {
+        QueueSnapshot(
+            queueEntries().map {
+                QueueEntrySnapshot(
+                    treeName = it.treeDisplayName,
+                    location = it.location,
+                    logHandlingMode = it.logHandlingMode,
+                    goal = it.goal,
+                    remaining = it.remaining
+                )
+            },
+            settings.queueActiveIndex,
+            settings.queueEnabled
+        )
+    }
+
+    fun currentQueueProgress(): QueueProgress? = synchronized(queueLock) {
+        if (!settings.queueEnabled) {
+            return null
+        }
+        val idx = settings.queueActiveIndex
+        val entry = queueEntries().getOrNull(idx) ?: return null
+        QueueProgress(
+            idx,
+            queueEntries().size,
+            entry.treeDisplayName,
+            entry.location,
+            entry.remaining,
+            entry.goal
+        )
+    }
+
+    fun isQueueLocked(): Boolean = synchronized(queueLock) {
+        settings.queueEnabled && settings.queueActiveIndex in queueEntries().indices
+    }
+
+    fun addQueueEntry(entry: QueueEntry) {
+        synchronized(queueLock) {
+            if (entry.goal < 0) {
+                entry.goal = 0
+            }
+            if (entry.goal > 0 && entry.remaining <= 0) {
+                entry.remaining = entry.goal
+            }
+            if (entry.goal == 0 && entry.remaining < 0) {
+                entry.remaining = 0
+            }
+            queueEntries().add(entry)
+            if (settings.queueActiveIndex == -1 && settings.queueEnabled) {
+                settings.queueActiveIndex = 0
+            }
+        }
+        performSavePersistentData()
+    }
+
+    fun removeQueueEntry(index: Int) {
+        var removedActive = false
+        synchronized(queueLock) {
+            val list = queueEntries()
+            if (index !in list.indices) {
+                return
+            }
+            if (settings.queueActiveIndex == index) {
+                removedActive = true
+            } else if (settings.queueActiveIndex > index) {
+                settings.queueActiveIndex -= 1
+            }
+            list.removeAt(index)
+            if (list.isEmpty()) {
+                settings.queueActiveIndex = -1
+                settings.queueEnabled = false
+                queueActiveEntryIndex = -1
+                pendingQueueStop = false
+            } else if (removedActive) {
+                settings.queueActiveIndex = settings.queueActiveIndex.coerceIn(0, list.lastIndex)
+                queueActiveEntryIndex = -1
+            }
+        }
+        performSavePersistentData()
+        if (removedActive) {
+            handleQueueState()
+        }
+    }
+
+    fun moveQueueEntryUp(index: Int) {
+        moveQueueEntry(index, index - 1)
+    }
+
+    fun moveQueueEntryDown(index: Int) {
+        moveQueueEntry(index, index + 1)
+    }
+
+    private fun moveQueueEntry(from: Int, to: Int) {
+        var shouldReactivate = false
+        var moved = false
+        synchronized(queueLock) {
+            val list = queueEntries()
+            if (from !in list.indices || to !in list.indices) {
+                return
+            }
+            val entry = list.removeAt(from)
+            list.add(to, entry)
+            when {
+                settings.queueActiveIndex == from -> {
+                    settings.queueActiveIndex = to
+                    shouldReactivate = true
+                }
+                from < settings.queueActiveIndex && to >= settings.queueActiveIndex -> settings.queueActiveIndex -= 1
+                from > settings.queueActiveIndex && to <= settings.queueActiveIndex -> settings.queueActiveIndex += 1
+            }
+            moved = true
+        }
+        if (!moved) {
+            return
+        }
+        performSavePersistentData()
+        if (shouldReactivate) {
+            queueActiveEntryIndex = -1
+            handleQueueState()
+        }
+    }
+
+    fun resetQueueEntry(index: Int) {
+        synchronized(queueLock) {
+            val entry = queueEntries().getOrNull(index) ?: return
+            entry.remaining = if (entry.goal > 0) entry.goal else 0
+        }
+        performSavePersistentData()
+    }
+
+    fun resetEntireQueueProgress() {
+        synchronized(queueLock) {
+            queueEntries().forEach { entry ->
+                entry.remaining = if (entry.goal > 0) entry.goal else 0
+            }
+            if (queueEntries().isNotEmpty()) {
+                settings.queueActiveIndex = 0
+            }
+            queueActiveEntryIndex = -1
+            pendingQueueStop = false
+        }
+        performSavePersistentData()
+    }
+
+    fun startQueueAt(index: Int, resetRemaining: Boolean) {
+        var activate = false
+        synchronized(queueLock) {
+            val list = queueEntries()
+            if (index !in list.indices) {
+                return
+            }
+            if (resetRemaining) {
+                val entry = list[index]
+                entry.remaining = if (entry.goal > 0) entry.goal else 0
+            }
+            settings.queueActiveIndex = index
+            settings.queueEnabled = list.isNotEmpty()
+            queueActiveEntryIndex = -1
+            activate = settings.queueEnabled
+        }
+        performSavePersistentData()
+        if (activate) {
+            handleQueueState()
+        }
+    }
+
+    fun setQueueEnabled(enabled: Boolean) {
+        var activate = false
+        synchronized(queueLock) {
+            val list = queueEntries()
+            settings.queueEnabled = enabled && list.isNotEmpty()
+            if (!settings.queueEnabled) {
+                settings.queueActiveIndex = -1
+                queueActiveEntryIndex = -1
+                pendingQueueStop = false
+            } else {
+                if (settings.queueActiveIndex !in list.indices) {
+                    settings.queueActiveIndex = 0
+                }
+                val entry = list[settings.queueActiveIndex]
+                if (entry.goal > 0 && entry.remaining <= 0) {
+                    entry.remaining = entry.goal
+                }
+                activate = true
+            }
+        }
+        performSavePersistentData()
+        if (activate) {
+            queueActiveEntryIndex = -1
+            handleQueueState()
+        }
+    }
+
+    private fun handleQueueState() {
+        val activationIndex = synchronized(queueLock) {
+            if (!settings.queueEnabled) {
+                queueActiveEntryIndex = -1
+                return@synchronized null
+            }
+            val list = queueEntries()
+            if (list.isEmpty()) {
+                settings.queueEnabled = false
+                settings.queueActiveIndex = -1
+                queueActiveEntryIndex = -1
+                return@synchronized null
+            }
+            if (settings.queueActiveIndex !in list.indices) {
+                settings.queueActiveIndex = 0
+            }
+            val entry = list[settings.queueActiveIndex]
+            if (entry.goal > 0 && entry.remaining <= 0) {
+                entry.remaining = entry.goal
+            }
+            if (queueActiveEntryIndex != settings.queueActiveIndex || !queueEntryMatchesCurrentConfiguration(entry)) {
+                settings.queueActiveIndex
+            } else {
+                null
+            }
+        } ?: return
+        applyQueueEntry(activationIndex)
+    }
+
+    private fun queueEntryMatchesCurrentConfiguration(entry: QueueEntry): Boolean {
+        val treeMatch = targetTree.equals(entry.treeDisplayName, ignoreCase = true)
+        val locationMatch = location.equals(entry.location, ignoreCase = true)
+        val logMatch = settings.logHandlingMode == entry.logHandlingMode
+        return treeMatch && locationMatch && logMatch
+    }
+
+    private fun applyQueueEntry(index: Int) {
+        val entryCopy = synchronized(queueLock) {
+            queueEntries().getOrNull(index)?.copy()
+        } ?: return
+        val allTrees = TreeTypes.ALL
+        var treeIndex = entryCopy.treeTypeIndex
+        if (treeIndex !in allTrees.indices || !allTrees[treeIndex].equals(entryCopy.treeDisplayName, ignoreCase = true)) {
+            treeIndex = allTrees.indexOfFirst { it.equals(entryCopy.treeDisplayName, ignoreCase = true) }
+            if (treeIndex == -1) {
+                treeIndex = 0
+            }
+            synchronized(queueLock) {
+                queueEntries().getOrNull(index)?.let {
+                    it.treeTypeIndex = treeIndex
+                    it.treeDisplayName = allTrees[treeIndex]
+                }
+            }
+        }
+
+        settings.savedTreeType = treeIndex
+        targetTree = allTrees[treeIndex]
+        settings.savedLocation = entryCopy.location
+        location = entryCopy.location
+        settings.logHandlingMode = entryCopy.logHandlingMode
+        onSettingsChanged()
+        queueActiveEntryIndex = index
+        lastQueueStatusAt = 0L
+        currentQueueProgress()?.let { updateQueueStatus(it, force = true) }
+    }
+
+    private fun handleQueueLogs(quantity: Int) {
+        if (quantity <= 0) {
+            return
+        }
+        var completed = false
+        var snapshot: QueueProgress? = null
+        synchronized(queueLock) {
+            if (!settings.queueEnabled) {
+                return
+            }
+            val idx = settings.queueActiveIndex
+            val entry = queueEntries().getOrNull(idx) ?: return
+            if (entry.goal > 0) {
+                entry.remaining = (entry.remaining - quantity).coerceAtLeast(0)
+            } else {
+                entry.remaining = (entry.remaining - quantity).coerceAtLeast(0)
+            }
+            snapshot = QueueProgress(
+                idx,
+                queueEntries().size,
+                entry.treeDisplayName,
+                entry.location,
+                entry.remaining,
+                entry.goal
+            )
+            if (entry.goal > 0 && entry.remaining <= 0) {
+                completed = true
+            }
+        }
+        snapshot?.let { progress ->
+            updateQueueStatus(progress)
+            val shouldPersist = completed || (progress.goal > 0 && progress.remaining % 25 == 0)
+            if (shouldPersist) {
+                performSavePersistentData()
+            }
+        }
+        if (completed) {
+            completeQueueEntry()
+        }
+    }
+
+    private fun completeQueueEntry() {
+        var nextIndex: Int? = null
+        var queueFinished = false
+        synchronized(queueLock) {
+            val list = queueEntries()
+            val idx = settings.queueActiveIndex
+            val entry = list.getOrNull(idx) ?: return
+            entry.remaining = 0
+            if (idx + 1 < list.size) {
+                settings.queueActiveIndex = idx + 1
+                val next = list[idx + 1]
+                if (next.goal > 0 && next.remaining <= 0) {
+                    next.remaining = next.goal
+                }
+                nextIndex = settings.queueActiveIndex
+            } else {
+                settings.queueEnabled = false
+                settings.queueActiveIndex = -1
+                queueFinished = true
+            }
+        }
+        performSavePersistentData()
+        if (queueFinished) {
+            onQueueCompleted()
+        } else {
+            queueActiveEntryIndex = -1
+            nextIndex?.let { applyQueueEntry(it) }
+        }
+    }
+
+    private fun onQueueCompleted() {
+        updateStatus("Queue complete")
+        queueActiveEntryIndex = -1
+        pendingQueueStop = true
+    }
+
+    private fun updateQueueStatus(progress: QueueProgress, force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastQueueStatusAt < queueStatusThrottleMs) {
+            return
+        }
+        updateStatus("Queue ${progress.index + 1}/${progress.total}: ${progress.remaining} ${progress.treeName} left @ ${progress.location}")
+        lastQueueStatusAt = now
+    }
+
+    private fun attemptQueueStop() {
+        if (!pendingQueueStop) {
+            return
+        }
+        pendingQueueStop = false
+        val methods = this::class.java.methods
+        val stopWithReason = methods.firstOrNull { it.name.equals("stop", ignoreCase = true) && it.parameterCount == 1 && it.parameterTypes[0] == String::class.java }
+        if (stopWithReason != null) {
+            runCatching { stopWithReason.invoke(this, "Queue complete") }
+                .onFailure { warn("Queue complete; failed to auto-stop script: ${it.message}") }
+            return
+        }
+        val stopNoArg = methods.firstOrNull { it.name.equals("stop", ignoreCase = true) && it.parameterCount == 0 }
+        if (stopNoArg != null) {
+            runCatching { stopNoArg.invoke(this) }
+                .onFailure { warn("Queue complete; failed to auto-stop script: ${it.message}") }
+            return
+        }
+        warn("Queue complete; unable to automatically stop script. Please stop manually.")
+    }
     override fun getBuildableUI(): BuildableUI = gui
 
     override fun onDrawConfig(workspace: Workspace?) {
@@ -629,35 +1030,29 @@ val statsObject = JsonObject().apply {
 
     private fun resolveFletchingProduct(logItem: InventoryItem): FletchingProduct? {
         val itemName = logItem.name
+        val normalized = itemName.lowercase()
+
+        if (!normalized.contains("log")) {
+            return null
+        }
+
+        if (normalized == "logs" || normalized == "normal logs") {
+            return FletchingProduct.ARROW_SHAFTS
+        }
 
         val primaryMatch = FletchingProduct.entries.firstOrNull { product ->
-            val primary = product.primaryMaterial
-            primary != null && primary.equals(itemName, ignoreCase = true)
+            product.primaryMaterial?.equals(itemName, ignoreCase = true) == true
         }
         if (primaryMatch != null) {
             return primaryMatch
         }
 
-        val displayMatch = FletchingProduct.entries.firstOrNull { product ->
-            product.displayName.equals(itemName, ignoreCase = true)
+        val partialMatch = FletchingProduct.entries.firstOrNull { product ->
+            val primary = product.primaryMaterial?.lowercase() ?: return@firstOrNull false
+            normalized.contains(primary) || primary.contains(normalized)
         }
-        if (displayMatch != null) {
-            return displayMatch
-        }
-
-        if (itemName.equals("Logs", ignoreCase = true) || itemName.equals("Normal logs", ignoreCase = true)) {
-            return FletchingProduct.ARROW_SHAFTS
-        }
-
-        val keyword = itemName.lowercase().substringBefore(" logs").trim()
-        if (keyword.isNotEmpty()) {
-            val partial = FletchingProduct.entries.firstOrNull { product ->
-                val primary = product.primaryMaterial
-                primary != null && primary.lowercase().contains(keyword)
-            }
-            if (partial != null) {
-                return partial
-            }
+        if (partialMatch != null) {
+            return partialMatch
         }
 
         return null
@@ -1002,6 +1397,9 @@ val statsObject = JsonObject().apply {
         if (statsChanged) {
             persistStats()
         }
+        if (isLog) {
+            handleQueueLogs(quantityAdded)
+        }
     }
 
     fun formattedRuntime(): String {
@@ -1117,8 +1515,39 @@ val statsObject = JsonObject().apply {
 
     }
 
+    internal fun canAttemptNavigation(now: Long = System.currentTimeMillis()): Boolean =
+        now >= nextNavigationAllowedAt
+
+    internal fun scheduleNavigationRetry(state: NavState, now: Long = System.currentTimeMillis()) {
+        val delayMs = when (state) {
+            NavState.CONTINUE -> navigationInProgressRetryMs
+            NavState.NO_PATH, NavState.FAILED -> navigationFailureRetryMs
+            NavState.FINISHED, NavState.IDLE -> navigationCooldownMs
+        }
+        scheduleNavigationRetry(delayMs, now)
+    }
+
+    internal fun scheduleNavigationRetry(delayMs: Long, now: Long = System.currentTimeMillis()) {
+        nextNavigationAllowedAt = now + delayMs
+    }
     private fun toCoordinate(x: Int?, y: Int?, z: Int?): Coordinate? =
         if (x != null && y != null && z != null) Coordinate(x, y, z) else null
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

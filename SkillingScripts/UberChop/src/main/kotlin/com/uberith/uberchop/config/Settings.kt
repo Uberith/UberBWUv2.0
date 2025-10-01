@@ -70,7 +70,12 @@ data class Settings(
 
     // Deposit filters
     var depositInclude: MutableList<String> = mutableListOf(),
-    var depositKeep: MutableList<String> = mutableListOf()
+    var depositKeep: MutableList<String> = mutableListOf(),
+
+    // Queue system
+    var queueEnabled: Boolean = false,
+    var queueEntries: MutableList<QueueEntry> = mutableListOf(),
+    var queueActiveIndex: Int = -1
 
 )
 
@@ -110,3 +115,12 @@ data class CustomLocation(
 )
 
 
+
+data class QueueEntry(
+    var treeDisplayName: String = "",
+    var treeTypeIndex: Int = 0,
+    var location: String = "",
+    var logHandlingMode: Int = 0,
+    var goal: Int = 0,
+    var remaining: Int = 0
+)

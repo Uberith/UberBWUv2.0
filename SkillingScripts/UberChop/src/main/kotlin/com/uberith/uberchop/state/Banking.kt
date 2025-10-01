@@ -5,7 +5,8 @@ import com.uberith.uberchop.Equipment
 import com.uberith.uberchop.UberChop
 import net.botwithus.kxapi.game.inventory.Backpack
 import net.botwithus.kxapi.game.inventory.Bank
-import net.botwithus.xapi.game.traversal.Traverse
+import botwithus.navigation.api.NavPath
+import botwithus.navigation.api.State as NavState
 import net.botwithus.kxapi.permissive.dsl.BranchName
 import net.botwithus.kxapi.permissive.dsl.LeafName
 import net.botwithus.kxapi.permissive.dsl.StateBuilder
@@ -24,8 +25,11 @@ class Banking(
                     (bot.woodBoxWithdrawAttempted && !bot.woodBoxWithdrawSucceeded)
             )
             val needsJuju = bot.needsJujuRestock()
-            Backpack.contains(bot.logPattern) ||
-                (bot.settings.pickupNests && Backpack.contains(bot.birdNestPattern)) ||
+            val shouldBankLogs = bot.logHandlingPreference != UberChop.LogHandling.FLETCH &&
+                Backpack.contains(bot.logPattern)
+            val shouldBankNests = bot.settings.pickupNests && Backpack.contains(bot.birdNestPattern)
+            shouldBankLogs ||
+                shouldBankNests ||
                 needsWoodBox ||
                 needsJuju
         }) {
@@ -59,23 +63,46 @@ class Banking(
                 return@leaf
             }
 
+            if (!bot.canAttemptNavigation()) {
+                return@leaf
+            }
+
             if (!bot.movementGate.compareAndSet(false, true)) {
                 return@leaf
             }
 
             try {
                 bot.updateStatus("Walking to bank")
-                val traversed = runCatching { Traverse.to(bankTile) }
-                    .onFailure { error -> bot.warn("StepToBank: traverse failed ${error.message}") }
-                    .getOrDefault(false)
-                if (!traversed) {
-                    bot.debug("StepToBank: traversal request was not started")
+                val navPath = runCatching { NavPath.resolve(bankTile) }
+                    .onFailure { error -> bot.warn("StepToBank: NavPath.resolve failed ${error.message}") }
+                    .getOrNull()
+                    ?: run {
+                        bot.scheduleNavigationRetry(NavState.FAILED)
+                        return@leaf
+                    }
+
+                val navState = runCatching {
+                    navPath.process()
+                    navPath.state()
+                }.onFailure { error ->
+                    bot.warn("StepToBank: navigation process failed ${error.message}")
+                }.getOrNull() ?: run {
+                    bot.scheduleNavigationRetry(NavState.FAILED)
+                    return@leaf
+                }
+
+                bot.scheduleNavigationRetry(navState)
+
+                when (navState) {
+                    NavState.NO_PATH -> bot.warn("StepToBank: no path found to $bankTile")
+                    NavState.FAILED -> bot.warn("StepToBank: navigation failed to $bankTile")
+                    NavState.FINISHED -> bot.debug("StepToBank: already near bank")
+                    else -> {}
                 }
             } finally {
                 bot.movementGate.set(false)
             }
         }
-
         // Attempt to open the nearest bank chest or booth.
         leaf(LeafName("OpenBank")) {
             val bankTile = bot.bankTile
@@ -90,7 +117,8 @@ class Banking(
         }
 
         branch(BranchName("ShouldDepositLogs"), condition = {
-            Backpack.contains(bot.logPattern)
+            bot.logHandlingPreference != UberChop.LogHandling.FLETCH &&
+                Backpack.contains(bot.logPattern)
         }) {
             onSuccess(LeafName("DepositLogs"))
             onFailure(BranchName("ShouldDepositNests"))
@@ -331,7 +359,15 @@ class Banking(
             }
             bot.woodBoxWithdrawAttempted = false
             bot.woodBoxWithdrawSucceeded = false
-            bot.switchState(BotState.CHOPPING, "Backpack clear")
+            val shouldFletch = bot.logHandlingPreference == UberChop.LogHandling.FLETCH &&
+                Backpack.contains(bot.logPattern)
+            val nextState = if (shouldFletch) BotState.FLETCHING else BotState.CHOPPING
+            val reason = if (shouldFletch) {
+                "Resume fletching logs"
+            } else {
+                "Backpack clear"
+            }
+            bot.switchState(nextState, reason)
             bot.chopWorkedLastTick = false
         }
 
@@ -339,4 +375,3 @@ class Banking(
     }
 
 }
-

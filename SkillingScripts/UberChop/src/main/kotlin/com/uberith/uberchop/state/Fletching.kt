@@ -16,7 +16,6 @@ class Fletching(
     override fun StateBuilder<UberChop>.create() {
         branch(BranchName("ReadyToFletch"), condition = {
             bot.logHandlingPreference == UberChop.LogHandling.FLETCH &&
-                Backpack.isFull() &&
                 bot.hasFletchableLogs()
         }) {
             onSuccess(BranchName("HasLogs"))
@@ -38,7 +37,7 @@ class Fletching(
         }
 
         leaf(LeafName("ReturnToChopping")) {
-            if (Backpack.contains(bot.logPattern) && Backpack.isFull() &&
+            if (Backpack.contains(bot.logPattern) &&
                 bot.logHandlingPreference == UberChop.LogHandling.FLETCH
             ) {
                 bot.delay(1)

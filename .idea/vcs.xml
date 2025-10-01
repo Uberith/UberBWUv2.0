@@ -4,8 +4,6 @@
     <mapping directory="" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/../BWU-V2-XAPI-KT" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/../BotWithUs-V2-XAPI" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/external/BotWithUs-V2-API" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/external/BotWithUs-V2-XAPI" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/external/UberBWUv2" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/temp_remote_repo" vcs="Git" />
   </component>
 </project>

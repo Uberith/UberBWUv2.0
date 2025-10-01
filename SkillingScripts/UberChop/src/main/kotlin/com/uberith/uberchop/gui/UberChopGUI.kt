@@ -2,6 +2,8 @@ package com.uberith.uberchop.gui
 
 import com.uberith.uberchop.UberChop
 import com.uberith.uberchop.config.TreeLocations
+import com.uberith.uberchop.config.QueueEntry
+import com.uberith.uberchop.config.TreeTypes
 import net.botwithus.imgui.ImGui
 import net.botwithus.kxapi.imgui.ImGuiUI
 import org.slf4j.LoggerFactory
@@ -9,6 +11,7 @@ import java.io.ByteArrayOutputStream
 import javax.imageio.ImageIO
 import com.uberith.api.ui.ColorManager
 import com.uberith.api.ui.CustomImages
+import com.uberith.api.ui.NavigationUI
 import net.botwithus.kxapi.game.skilling.impl.woodcutting.TreeType
 import net.botwithus.rs3.entities.LocalPlayer
 import net.botwithus.rs3.world.ClientState
@@ -17,11 +20,22 @@ import net.botwithus.ui.workspace.Workspace
 import net.botwithus.scripts.Info
 
 class UberChopGUI(private val script: UberChop) : ImGuiUI() {
-    // 0 Overview, 1 Core, 2 Handlers, 3 WorldHop, 4 Advanced, 5 Statistics, 6 Support
-    private var selectedTab: Int = 0
-    private val FIXED_W = 560f
-    private val FIXED_H = 620f
-    private val CONTENT_H = 455f
+    // Tab identifiers mirror the navigation order for the shared UI components
+    private var selectedTab: String = "Overview"
+    private val tabOrder = listOf(
+        "Overview",
+        "Core",
+        "Handlers",
+        "WorldHop",
+        "Advanced",
+        "Statistics",
+        "Support",
+        "Debug"
+    )
+    private val WINDOW_W = 860f
+    private val WINDOW_H = 560f
+    private val NAV_W = 180f
+    private val NAV_BUTTON_H = 40f
     // Target tree selection will use a true Combo box (dropdown)
 
     private val windowTitle by lazy {
@@ -38,6 +52,8 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
     private var bankYArr = intArrayOf(0)
     private var bankZArr = intArrayOf(0)
     private var chopXYZText: String = ""
+    private val logHandlingOptions = listOf("Bank Logs", "Burn Logs", "Fletch Logs")
+    private var queueGoalInput = 1000
     private var bankXYZText: String = ""
 
     // Textures (loaded once, freed on demand)
@@ -83,75 +99,93 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
 
 
     private fun renderInternal() {
-        // Ensure persisted tree/location are reflected before any UI usage
         script.ensureUiSettingsLoaded()
-        // Fixed-size, small-screen friendly window (supports compact mode)
-        ImGui.setNextWindowSize(FIXED_W, FIXED_H)
+        if (!tabOrder.contains(selectedTab)) {
+            selectedTab = tabOrder.first()
+        }
+
+        ImGui.setNextWindowSize(WINDOW_W, WINDOW_H)
 
         if (ImGui.begin(windowTitle, 0)) {
-            val cm = ColorManager()
-            cm.pushColors()
-            // Top logo + summary with minimize/expand toggle
-            drawLogoBar()
-            ImGui.text("Runtime ${script.formattedRuntime()}  |  Logs ${formatNumber(script.logsChopped)} (${formatNumber(script.logsPerHour())}/h)  |  Status ${script.currentStatus}")
-            ImGui.sameLine(0f, 8f)
+            val colorManager = ColorManager()
+            colorManager.pushColors()
+
+            drawHeaderSection()
+
             ImGui.separator()
 
-            // Left navigation (vertical buttons with icons + selection marker), Right content (scrollable)
-            val navW = 120f
-            if (ImGui.beginChild("LeftNav", navW, CONTENT_H, true, 0)) {
-                val navCount = 7
-                val fudge = 12f // extra safety to avoid scrollbar
-                val available = CONTENT_H - fudge
-                // No vertical spacing between buttons; compute height to fill column
-                // Reduce height further to ensure no scrollbar (trim 8px), keep clickable minimum
-                val btnH = ((available / navCount) - 8f).coerceAtLeast(18f)
-                val rightPad = 22f
-
-                drawNavItem(0, "Overview", navW, cm, btnH, rightPad)
-                drawNavItem(1, "Core", navW, cm, btnH, rightPad)
-                drawNavItem(2, "Handlers", navW, cm, btnH, rightPad)
-                drawNavItem(3, "WorldHop", navW, cm, btnH, rightPad)
-                drawNavItem(4, "Advanced", navW, cm, btnH, rightPad)
-                drawNavItem(5, "Statistics", navW, cm, btnH, rightPad)
-                drawNavItem(6, "Support", navW, cm, btnH, rightPad)            }
-            ImGui.endChild()
-
-            ImGui.sameLine(0f, 8f)
-
-            // Darker child background for content area to add depth
-            ImGui.pushStyleColor(ColorManager.ColorType.ChildBg.index, 12f/255f, 18f/255f, 45f/255f, 0.62f)
-            if (ImGui.beginChild("RightContent", 0f, CONTENT_H, true, 0)) {
-                // Inner child with darker border to simulate inner shadow
-                val borderDark = cm.getColor(ColorManager.ColorType.BorderShadow) ?: intArrayOf(8,8,16,170)
-                val bf = cm.colorToFloats(borderDark)
-                ImGui.pushStyleColor(ColorManager.ColorType.Border.index, bf[0], bf[1], bf[2], bf[3])
-                if (ImGui.beginChild("RightInner", 0f, 0f, true, 0)) {
-                    when (selectedTab) {
-                        0 -> drawOverview()
-                        1 -> drawCore()
-                        2 -> drawHandlers()
-                        3 -> drawWorldHop()
-                        4 -> drawAdvanced()
-                        5 -> drawStatistics()
-                        else -> drawSupport()
-                    }
-                }
-                ImGui.endChild()
-                ImGui.popStyleColor(1)
+            if (ImGui.beginChild("NavigationPanel", NAV_W, 0f, false, 0)) {
+                drawNavigationPanel()
             }
             ImGui.endChild()
-            ImGui.popStyleColor(1)
 
-            // Bottom status bar
+            ImGui.sameLine(0f, 16f)
+
+            if (ImGui.beginChild("ContentPanel", 0f, 0f, false, 0)) {
+                when (selectedTab) {
+                    "Overview" -> drawOverview()
+                    "Core" -> drawCore()
+                    "Handlers" -> drawHandlers()
+                    "WorldHop" -> drawWorldHop()
+                    "Advanced" -> drawAdvanced()
+                    "Statistics" -> drawStatistics()
+                    "Support" -> drawSupport()
+                    "Debug" -> drawDebug()
+                }
+            }
+            ImGui.endChild()
+
             ImGui.separator()
-            val worldText = ClientState.GAME.id.toString()
-            val coordText = LocalPlayer.self().coordinate
-            ImGui.text("W: $worldText  |  XYZ: $coordText  |  Anim: ${LocalPlayer.self().animationId}")
-            cm.popColors()
+            drawFooter()
+            colorManager.popColors()
         }
         ImGui.end()
     }
+
+    private fun drawHeaderSection() {
+        if (ImGui.beginChild("HeaderSection", 0f, 120f, false, 0)) {
+            drawLogoBar()
+            ImGui.spacing()
+            ImGui.text("Runtime ${script.formattedRuntime()}  |  Logs ${formatNumber(script.logsChopped)} (${formatNumber(script.logsPerHour())}/h)  |  Status ${script.currentStatus}")
+            script.currentQueueProgress()?.let { progress ->
+                ImGui.pushStyleColor(ColorManager.ColorType.Text.index, 0.62f, 0.82f, 1f, 1f)
+                val label = if (progress.goal > 0) {
+                    val completed = (progress.goal - progress.remaining).coerceAtLeast(0)
+                    "Queue ${progress.index + 1}/${progress.total}: ${progress.remaining} logs remaining (${completed}/${progress.goal})"
+                } else {
+                    "Queue ${progress.index + 1}/${progress.total}: ${progress.remaining} logs remaining"
+                }
+                ImGui.text(label)
+                ImGui.popStyleColor(1)
+            }
+        }
+        ImGui.endChild()
+    }
+
+    private fun drawNavigationPanel() {
+        ImGui.text("Script")
+        ImGui.separator()
+        ImGui.text("Version: " + windowTitle.substringAfterLast(" | "))
+        ImGui.text("Runtime: ${script.formattedRuntime()}")
+        ImGui.text("Status: ${script.currentStatus}")
+        ImGui.separator()
+        NavigationUI(
+            selectedTab = selectedTab,
+            availableTabs = tabOrder,
+            onTabSelected = { selectedTab = it },
+            buttonWidth = NAV_W - 20f,
+            buttonHeight = NAV_BUTTON_H
+        ).draw()
+    }
+
+    private fun drawFooter() {
+        val player = runCatching { LocalPlayer.self() }.getOrNull()
+        val worldText = ClientState.GAME.id.toString()
+        val coordText = player?.coordinate?.toString() ?: "?"
+        val animText = player?.animationId?.toString() ?: "?"
+        ImGui.text("W: $worldText  |  XYZ: $coordText  |  Anim: $animText")
+    }
+
 
     private fun drawLogoBar() {
         // Ensure we (re)attempt loading on the render thread where the UI context is valid
@@ -655,38 +689,6 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
         ImGui.spacing()
     }
 
-    private fun drawNavItem(index: Int, label: String, navW: Float, cm: ColorManager, btnH: Float, rightPad: Float) {
-        val isSelected = (selectedTab == index)
-        if (isSelected) {
-            // Colored selection bar using modern accent
-            run {
-                val f = cm.accentF()
-                ImGui.pushStyleColor(ColorManager.ColorType.ChildBg.index, f[0], f[1], f[2], f[3])
-            }
-            ImGui.beginChild("NavSelBar$index", 5f, btnH, false, 0)
-            ImGui.endChild()
-            ImGui.popStyleColor(1)
-            ImGui.sameLine(0f, 6f)
-            // Accent the active button background
-            val fa = cm.accentF()
-            val fh = cm.accentHoverF()
-            val ft = cm.accentActiveF()
-            ImGui.pushStyleColor(ColorManager.ColorType.Button.index, fa[0], fa[1], fa[2], fa[3])
-            ImGui.pushStyleColor(ColorManager.ColorType.ButtonHovered.index, fh[0], fh[1], fh[2], fh[3])
-            ImGui.pushStyleColor(ColorManager.ColorType.ButtonActive.index, ft[0], ft[1], ft[2], ft[3])
-        } else {
-            ImGui.beginChild("NavSelBar$index", 5f, btnH, false, 0)
-            ImGui.endChild()
-            ImGui.sameLine(0f, 6f)
-        }
-        val shown = label
-        val clicked = ImGui.button(shown, navW - 5f - 6f - rightPad, btnH)
-        if (isSelected) ImGui.popStyleColor(3)
-        if (clicked) {
-            selectedTab = index
-        }
-    }
-
     private fun drawNavSpacer(height: Float, id: Int) {
         // Create vertical space using an empty child of specified height (stable ID to avoid rebuild churn)
         ImGui.beginChild("NavSpacer_$id", 0f, height, false, 0)
@@ -694,10 +696,11 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
     }
 
     private fun drawOverview() {
+        var pendingSettingsRefresh = false
         ImGui.separator()
         ImGui.text("Target Tree:")
         ImGui.sameLine(0f, 6f)
-        val allTrees = com.uberith.uberchop.config.TreeTypes.ALL
+        val allTrees = TreeTypes.ALL
         val currentIdx = script.settings.savedTreeType.coerceIn(0, allTrees.size - 1)
         val currentName = allTrees[currentIdx]
         // Build (index, name, level?) triples
@@ -724,7 +727,7 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
                     script.settings.savedTreeType = e.idx
                     script.targetTree = e.name
                     treeChanged = true
-                    script.onSettingsChanged()
+                    pendingSettingsRefresh = true
                 }
             }
             ImGui.endCombo()
@@ -736,7 +739,7 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
             val fallback = filtered.firstOrNull()?.name ?: script.treeLocations.firstOrNull()?.name ?: ""
             script.location = fallback
             script.settings.savedLocation = fallback
-            script.onSettingsChanged()
+            pendingSettingsRefresh = true
         }
         val locationNames = filtered.map { it.name }
         val curLocName = script.location
@@ -750,22 +753,26 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
                 if (ImGui.selectable(locationNames[i], isSelected, 0, 0f, 0f)) {
                     script.location = locationNames[i]
                     script.settings.savedLocation = script.location
-                    script.onSettingsChanged()
+                    pendingSettingsRefresh = true
                 }
             }
             ImGui.endCombo()
         }
 
+        if (pendingSettingsRefresh) {
+            script.onSettingsChanged()
+            pendingSettingsRefresh = false
+        }
+
         // Log handling mode
-        val logOptions = listOf("Bank Logs", "Burn Logs", "Fletch Logs")
-        val curLogIdx = script.settings.logHandlingMode.coerceIn(0, logOptions.lastIndex)
+        val curLogIdx = script.settings.logHandlingMode.coerceIn(0, logHandlingOptions.lastIndex)
         ImGui.text("On logs:")
         ImGui.sameLine(0f, 6f)
-        val shownLog = logOptions.getOrElse(curLogIdx) { logOptions.first() }
+        val shownLog = logHandlingOptions.getOrElse(curLogIdx) { logHandlingOptions.first() }
         if (ImGui.beginCombo("##logsActionCombo", shownLog, 0)) {
-            for (i in logOptions.indices) {
+            for (i in logHandlingOptions.indices) {
                 val isSelected = (i == curLogIdx)
-                if (ImGui.selectable(logOptions[i], isSelected, 0, 0f, 0f)) {
+                if (ImGui.selectable(logHandlingOptions[i], isSelected, 0, 0f, 0f)) {
                     script.settings.logHandlingMode = i
                     script.onSettingsChanged()
                 }
@@ -881,7 +888,7 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
         ImGui.text("Requirements")
         val treeType = resolveTreeType(script.targetTree)
         val reqLevel = treeType?.levelReq
-        ImGui.text("Recommended WC Level: ${reqLevel ?: "—"}")
+        ImGui.text("Recommended WC Level: ${reqLevel ?: "\u2014"}")
         // Show user's WC level, colored green if >= recommended, else red
         val userWc = script.WCLevel
         ImGui.text("Your WC Level:")
@@ -928,6 +935,162 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
         }
 
         // No Inventory Hints or Bank/Chop sections on Overview per request
+
+        ImGui.separator()
+        drawQueueSection()
+    }
+
+    private fun drawQueueSection() {
+        ImGui.text("Queue Manager")
+        ImGui.separator()
+
+        var snapshot = script.queueSnapshot()
+        val queueEnabled = snapshot.enabled
+        val toggledQueueEnabled = ImGui.checkbox("Enable queue", queueEnabled)
+        if (toggledQueueEnabled != queueEnabled) {
+            script.setQueueEnabled(toggledQueueEnabled)
+            snapshot = script.queueSnapshot()
+        }
+        ImGui.sameLine(0f, -1f)
+        if (ImGui.button("Reset Progress", 140f, 0f)) {
+            script.resetEntireQueueProgress()
+            snapshot = script.queueSnapshot()
+        }
+
+        script.currentQueueProgress()?.let { progress ->
+            ImGui.pushStyleColor(ColorManager.ColorType.Text.index, 0.62f, 0.82f, 1f, 1f)
+            val label = if (progress.goal > 0) {
+                val completed = (progress.goal - progress.remaining).coerceAtLeast(0)
+                "Active job ${progress.index + 1}/${progress.total}: ${progress.remaining} logs remaining (${completed}/${progress.goal})"
+            } else {
+                "Active job ${progress.index + 1}/${progress.total}: ${progress.remaining} logs remaining"
+            }
+            ImGui.text(label)
+            ImGui.popStyleColor(1)
+        }
+
+        ImGui.separator()
+        ImGui.text("Add Job (uses selections above)")
+
+        val treeOptions = TreeTypes.ALL
+        val savedTreeIndex = if (treeOptions.isEmpty()) -1 else script.settings.savedTreeType.coerceIn(0, treeOptions.lastIndex)
+        val selectedTree = treeOptions.getOrElse(savedTreeIndex) { script.targetTree }.ifBlank { script.targetTree }
+        val resolvedLocation = script.location.ifBlank {
+            script.settings.savedLocation.ifBlank { script.treeLocations.firstOrNull()?.name ?: "" }
+        }
+        val displayedLocation = resolvedLocation.ifBlank { "Anywhere" }
+        val logMode = script.settings.logHandlingMode.coerceIn(0, logHandlingOptions.lastIndex)
+        val handlingLabel = logHandlingOptions[logMode]
+
+        ImGui.text("Next job will use ${selectedTree.ifBlank { "—" }} @ ${displayedLocation.ifBlank { "—" }} ($handlingLabel)")
+
+        val updatedGoal = ImGui.inputInt("Logs to chop", queueGoalInput, 100, 500, 0)
+        if (updatedGoal != queueGoalInput) {
+            queueGoalInput = updatedGoal.coerceAtLeast(1)
+        }
+        if (queueGoalInput < 1) {
+            queueGoalInput = 1
+        }
+
+        val hasValidTree = savedTreeIndex >= 0 && selectedTree.isNotBlank()
+        val canAddJob = hasValidTree && displayedLocation.isNotBlank() && queueGoalInput > 0
+        if (!canAddJob) {
+            ImGui.beginDisabled(true)
+        }
+        if (ImGui.button("Add to Queue", 138f, 0f)) {
+            val entry = QueueEntry(
+                treeDisplayName = selectedTree,
+                treeTypeIndex = savedTreeIndex,
+                location = displayedLocation,
+                logHandlingMode = logMode,
+                goal = queueGoalInput.coerceAtLeast(1),
+                remaining = queueGoalInput.coerceAtLeast(1)
+            )
+            script.addQueueEntry(entry)
+            snapshot = script.queueSnapshot()
+        }
+        if (!canAddJob) {
+            ImGui.endDisabled()
+        }
+        if (!hasValidTree) {
+            ImGui.pushStyleColor(ColorManager.ColorType.Text.index, 0.94f, 0.36f, 0.36f, 1f)
+            ImGui.text("Select a target tree above before adding to the queue.")
+            ImGui.popStyleColor(1)
+        }
+
+        ImGui.separator()
+        ImGui.text("Scheduled Jobs")
+        if (snapshot.entries.isEmpty()) {
+            ImGui.pushStyleColor(ColorManager.ColorType.Text.index, 0.8f, 0.8f, 0.8f, 1f)
+            ImGui.text("Queue is empty. Add a job above to get started.")
+            ImGui.popStyleColor(1)
+            return
+        }
+
+        val rowsVisible = snapshot.entries.size.coerceAtMost(4)
+        val rowHeight = 88f
+        val listHeight = (rowsVisible * rowHeight + 28f).coerceAtLeast(140f)
+        val childOpen = ImGui.beginChild("QueueList", 0f, listHeight, true, 0)
+        if (childOpen) {
+            snapshot.entries.forEachIndexed { index, entry ->
+                if (index > 0) {
+                    ImGui.separator()
+                }
+                val active = snapshot.enabled && index == snapshot.activeIndex
+                val header = if (active) "▶ Job ${index + 1}" else "Job ${index + 1}"
+                if (active) {
+                    ImGui.pushStyleColor(ColorManager.ColorType.Text.index, 0.62f, 0.82f, 1f, 1f)
+                }
+                ImGui.text(header)
+                if (active) {
+                    ImGui.popStyleColor(1)
+                }
+                ImGui.text("Tree: ${entry.treeName}")
+                ImGui.text("Location: ${entry.location}")
+                val modeText = logHandlingOptions.getOrElse(entry.logHandlingMode) { logHandlingOptions.first() }
+                ImGui.text("On logs: $modeText")
+
+                val remaining = entry.remaining.coerceAtLeast(0)
+                val goal = entry.goal.coerceAtLeast(0)
+                if (goal > 0) {
+                    val completed = (goal - remaining).coerceAtLeast(0)
+                    ImGui.text("$remaining left (${completed}/${goal})")
+                } else {
+                    ImGui.text("$remaining logs remaining")
+                }
+
+                if (ImGui.button("Start##queue_start_$index", 60f, 0f)) {
+                    script.startQueueAt(index, resetRemaining = false)
+                    snapshot = script.queueSnapshot()
+                }
+                ImGui.sameLine(0f, -1f)
+                if (ImGui.button("Reset##queue_reset_$index", 60f, 0f)) {
+                    script.resetQueueEntry(index)
+                    snapshot = script.queueSnapshot()
+                }
+                ImGui.sameLine(0f, -1f)
+                if (ImGui.button("Remove##queue_remove_$index", 70f, 0f)) {
+                    script.removeQueueEntry(index)
+                    snapshot = script.queueSnapshot()
+                    return@forEachIndexed
+                }
+                if (index > 0) {
+                    ImGui.sameLine(0f, -1f)
+                    if (ImGui.smallButton("▲##queue_up_$index")) {
+                        script.moveQueueEntryUp(index)
+                        snapshot = script.queueSnapshot()
+                    }
+                }
+                if (index < snapshot.entries.size - 1) {
+                    ImGui.sameLine(0f, -1f)
+                    if (ImGui.smallButton("▼##queue_down_$index")) {
+                        script.moveQueueEntryDown(index)
+                        snapshot = script.queueSnapshot()
+                    }
+                }
+            }
+        }
+        ImGui.endChild()
     }
 
     private fun drawCore() {
@@ -1234,13 +1397,13 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
                 if (o?.chopX != null && o.chopY != null && o.chopZ != null) net.botwithus.rs3.world.Coordinate(o.chopX!!, o.chopY!!, o.chopZ!!) else sel?.chop
             }
             if (c != null) "${c.x}, ${c.y}, ${c.z}" else "-"
-        } catch (_: Throwable) { "—" }
+        } catch (_: Throwable) { "\u2014" }
         val effBank = try {
             val sel = script.treeLocations.firstOrNull { it.name == curLoc }
             val o = script.settings.customLocations[curLoc]
             val b = if (o?.bankX != null && o.bankY != null && o.bankZ != null) net.botwithus.rs3.world.Coordinate(o.bankX!!, o.bankY!!, o.bankZ!!) else sel?.bank
             if (b != null) "${b.x}, ${b.y}, ${b.z}" else "-"
-        } catch (_: Throwable) { "—" }
+        } catch (_: Throwable) { "\u2014" }
         ImGui.text("Chop: $effChop  |  Bank: $effBank")
         if (ImGui.button("Set Chop Tile", 120f, 0f)) {
             try {
@@ -1392,6 +1555,49 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
         ImGui.text("Overall Runtime: ${formatDuration(script.lifetimeRuntimeMillis())}")
     }
 
+    private fun drawDebug() {
+        ImGui.text("Debug")
+        ImGui.separator()
+        ImGui.text("Status: ${script.currentStatus}")
+        ImGui.text("Runtime: ${script.formattedRuntime()}")
+        ImGui.text("Logs chopped: ${formatNumber(script.logsChopped)} (${formatNumber(script.logsPerHour())} /h)")
+        ImGui.text("XP gained: ${formatNumber(script.woodcuttingXpGained())} (${formatNumber(script.woodcuttingXpPerHour())} /h)")
+
+        val player = runCatching { LocalPlayer.self() }.getOrNull()
+        if (player != null) {
+            ImGui.text("Player position: ${player.coordinate}")
+            ImGui.text("Animation: ${player.animationId}")
+        } else {
+            ImGui.text("Player position: unavailable")
+        }
+
+        val queueSnapshot = script.queueSnapshot()
+        ImGui.separator()
+        ImGui.text("Queue enabled: ${if (queueSnapshot.enabled) "Yes" else "No"}")
+        ImGui.text("Active index: ${queueSnapshot.activeIndex}")
+        if (ImGui.beginChild("DebugQueue", 0f, 150f, true, 0)) {
+            if (queueSnapshot.entries.isEmpty()) {
+                ImGui.text("Queue is empty")
+            } else {
+                queueSnapshot.entries.forEachIndexed { index, entry ->
+                    val status = when {
+                        queueSnapshot.enabled && index == queueSnapshot.activeIndex -> "Active"
+                        else -> "Idle"
+                    }
+                    ImGui.text("#${index + 1} ${entry.treeName} @ ${entry.location} (${entry.remaining}/${entry.goal}) [$status]")
+                }
+            }
+        }
+        ImGui.endChild()
+
+        ImGui.separator()
+        ImGui.text("Break handler: ${if (script.settings.performRandomBreak) "Enabled" else "Disabled"}")
+        ImGui.text("Auto-stop: ${if (script.settings.enableAutoStop) "Enabled" else "Disabled"}")
+        ImGui.text("World hop: ${if (script.settings.enableWorldHopping) "Enabled" else "Disabled"}")
+        ImGui.text("AFK handler: ${if (script.settings.enableAfk) "Enabled" else "Disabled"}")
+    }
+
+
     private fun drawSupport() {
         ImGui.text("Support")
         ImGui.separator()
@@ -1406,5 +1612,13 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
     }
 
 }
+
+
+
+
+
+
+
+
 
 

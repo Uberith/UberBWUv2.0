@@ -3,6 +3,8 @@ package com.uberith.uberchop.state
 import com.uberith.uberchop.Equipment
 import com.uberith.api.game.world.Coordinates
 import com.uberith.uberchop.UberChop
+import botwithus.navigation.api.NavPath
+import botwithus.navigation.api.State as NavState
 import net.botwithus.rs3.entities.LocalPlayer
 import net.botwithus.kxapi.game.inventory.Backpack
 import net.botwithus.kxapi.game.skilling.impl.woodcutting.woodcutting
@@ -69,20 +71,63 @@ class Chopping(
 
         // Small placeholder move step; keep the UI updated while navigation logic is pending.
         leaf(LeafName("StepToTree")) {
-            if (bot.treeTile == null) {
+            val treeTile = bot.treeTile
+            if (treeTile == null) {
                 bot.updateStatus("Waiting for target tile")
                 return@leaf
             }
+
+            if (LocalPlayer.self().isMoving || LocalPlayer.self().animationId != -1) {
+                return@leaf
+            }
+
+            if (Coordinates.isPlayerWithinRadius(treeTile, 3)) {
+                return@leaf
+            }
+
+            if (!bot.canAttemptNavigation()) {
+                return@leaf
+            }
+
             if (!bot.movementGate.compareAndSet(false, true)) {
                 return@leaf
             }
+
             try {
-                bot.updateStatus("Moving to ${bot.targetTree}")
+                val targetName = bot.targetTree.ifBlank { "tree" }
+                bot.updateStatus("Moving to $targetName")
+                bot.chopWorkedLastTick = false
+
+                val navPath = runCatching { NavPath.resolve(treeTile) }
+                    .onFailure { error -> bot.warn("StepToTree: NavPath.resolve failed ${error.message}") }
+                    .getOrNull()
+                    ?: run {
+                        bot.scheduleNavigationRetry(NavState.FAILED)
+                        return@leaf
+                    }
+
+                val navState = runCatching {
+                    navPath.process()
+                    navPath.state()
+                }.onFailure { error ->
+                    bot.warn("StepToTree: navigation process failed ${error.message}")
+                }.getOrNull() ?: run {
+                    bot.scheduleNavigationRetry(NavState.FAILED)
+                    return@leaf
+                }
+
+                bot.scheduleNavigationRetry(navState)
+
+                when (navState) {
+                    NavState.NO_PATH -> bot.warn("StepToTree: no path found to $treeTile")
+                    NavState.FAILED -> bot.warn("StepToTree: navigation failed to $treeTile")
+                    NavState.FINISHED -> bot.debug("StepToTree: already near chopping spot")
+                    else -> {}
+                }
             } finally {
                 bot.movementGate.set(false)
             }
         }
-
 
         leaf(LeafName("DrinkJujuPotion")) {
             bot.updateStatus("Drinking juju potion")
@@ -194,4 +239,3 @@ class Chopping(
         root(BranchName("NeedsWoodBox"))
     }
 }
-
