@@ -33,3 +33,8 @@ tasks.named<JavaCompile>("compileJava").configure {
 tasks.named<KotlinCompile>("compileKotlin").configure {
     destinationDirectory.set(layout.buildDirectory.dir("classes/kotlin/main"))
 }
+
+tasks.named<Copy>("copyJar").configure {
+    dependsOn(":script-api:jvmJar")
+    from(project(":script-api").layout.buildDirectory.file("libs/script-api-jvm.jar"))
+}

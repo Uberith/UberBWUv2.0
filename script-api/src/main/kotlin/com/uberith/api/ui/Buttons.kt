@@ -11,34 +11,25 @@ class Buttons(private val colorManager: ColorManager = ColorManager()) {
         height: Float,
         onClick: () -> Unit
     ) {
-        val accent = colorManager.accentF()
-        val accentHover = colorManager.accentHoverF()
-        val accentActive = colorManager.accentActiveF()
-        val inactive = floats(colorManager.getColor(ColorManager.ColorType.FrameBg))
-        val inactiveHover = floats(colorManager.getColor(ColorManager.ColorType.FrameBgHovered))
-        val inactiveActive = floats(colorManager.getColor(ColorManager.ColorType.FrameBgActive))
-        val activeText = floatArrayOf(1f, 1f, 1f, 1f)
-        val inactiveText = floats(colorManager.getColor(ColorManager.ColorType.TextSecondary))
+        val baseColor = if (selected) colorManager.buttonSelectedColor else colorManager.buttonBgColor
+        val hoverColor = if (selected) colorManager.buttonSelectedColor else colorManager.buttonHoverColor
+        val activeColor = if (selected) colorManager.buttonSelectedColor else colorManager.buttonBgColor
+        val textColor = colorManager.whiteTextColor
 
-        val buttonColor = if (selected) accent else inactive
-        val hoverColor = if (selected) accentHover else inactiveHover
-        val activeColor = if (selected) accentActive else inactiveActive
-        val textColor = if (selected) activeText else inactiveText
+        val base = colorManager.colorToFloats(baseColor)
+        val hover = colorManager.colorToFloats(hoverColor)
+        val active = colorManager.colorToFloats(activeColor)
+        val text = colorManager.colorToFloats(textColor)
 
-        ImGui.pushStyleColor(ColorManager.ColorType.Button.index, buttonColor[0], buttonColor[1], buttonColor[2], buttonColor[3])
-        ImGui.pushStyleColor(ColorManager.ColorType.ButtonHovered.index, hoverColor[0], hoverColor[1], hoverColor[2], hoverColor[3])
-        ImGui.pushStyleColor(ColorManager.ColorType.ButtonActive.index, activeColor[0], activeColor[1], activeColor[2], activeColor[3])
-        ImGui.pushStyleColor(ColorManager.ColorType.ButtonText.index, textColor[0], textColor[1], textColor[2], textColor[3])
+        ImGui.pushStyleColor(ColorManager.ColorType.Button.index, base[0], base[1], base[2], base[3])
+        ImGui.pushStyleColor(ColorManager.ColorType.ButtonHovered.index, hover[0], hover[1], hover[2], hover[3])
+        ImGui.pushStyleColor(ColorManager.ColorType.ButtonActive.index, active[0], active[1], active[2], active[3])
+        ImGui.pushStyleColor(ColorManager.ColorType.ButtonText.index, text[0], text[1], text[2], text[3])
 
         if (ImGui.button("$label##NavButton", width, height)) {
             onClick()
         }
 
         ImGui.popStyleColor(4)
-    }
-
-    private fun floats(color: IntArray?): FloatArray {
-        val fallback = intArrayOf(45, 56, 73, 220)
-        return colorManager.colorToFloats(color ?: fallback)
     }
 }

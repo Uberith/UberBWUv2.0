@@ -32,15 +32,16 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
         "Support",
         "Debug"
     )
-    private val WINDOW_W = 860f
-    private val WINDOW_H = 560f
+    private val WINDOW_W = 800f
+    private val WINDOW_H = 620f
     private val NAV_W = 180f
     private val NAV_BUTTON_H = 40f
+    private var appliedInitialWindowSize = false
     // Target tree selection will use a true Combo box (dropdown)
 
     private val windowTitle by lazy {
         val version = script.javaClass.getAnnotation(Info::class.java)?.version?.takeIf { it.isNotBlank() } ?: "?"
-        "UberChop Permissive Settings | $version"
+        "UberChop Settings | $version"
     }
 
     // UI state for manual coordinate entry on Overview (for "Anywhere")
@@ -104,7 +105,13 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
             selectedTab = tabOrder.first()
         }
 
-        ImGui.setNextWindowSize(WINDOW_W, WINDOW_H)
+        if (!appliedInitialWindowSize) {
+            ImGui.setNextWindowSize(WINDOW_W, WINDOW_H)
+            appliedInitialWindowSize = true
+        }
+        try {
+            ImGui.setNextWindowBgAlpha(0.82f)
+        } catch (_: Throwable) { }
 
         if (ImGui.begin(windowTitle, 0)) {
             val colorManager = ColorManager()
@@ -163,12 +170,6 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
     }
 
     private fun drawNavigationPanel() {
-        ImGui.text("Script")
-        ImGui.separator()
-        ImGui.text("Version: " + windowTitle.substringAfterLast(" | "))
-        ImGui.text("Runtime: ${script.formattedRuntime()}")
-        ImGui.text("Status: ${script.currentStatus}")
-        ImGui.separator()
         NavigationUI(
             selectedTab = selectedTab,
             availableTabs = tabOrder,
@@ -196,7 +197,7 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
                 CustomImages().renderImage(logoImg as Any, 220f, 44f)
             } else {
                 // Fallback text title when no texture API or image not loaded yet
-                ImGui.text("Uberith")
+                ImGui.text("Uberith Gaming")
             }
         }
         ImGui.endChild()
@@ -676,13 +677,11 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
     }
 
     private fun header(title: String, cm: ColorManager) {
-        val fa = cm.accentF()
-        // Accent-colored title text
-        ImGui.pushStyleColor(ColorManager.ColorType.Text.index, fa[0], fa[1], fa[2], fa[3])
+        val accent = cm.colorToFloats(cm.buttonSelectedColor)
+        ImGui.pushStyleColor(ColorManager.ColorType.Text.index, accent[0], accent[1], accent[2], accent[3])
         ImGui.text(title)
         ImGui.popStyleColor(1)
-        // Accent underline bar
-        ImGui.pushStyleColor(ColorManager.ColorType.ChildBg.index, fa[0], fa[1], fa[2], fa[3])
+        ImGui.pushStyleColor(ColorManager.ColorType.ChildBg.index, accent[0], accent[1], accent[2], accent[3])
         ImGui.beginChild("underline_$title", 0f, 2f, false, 0)
         ImGui.endChild()
         ImGui.popStyleColor(1)
@@ -696,28 +695,65 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
     }
 
     private fun drawOverview() {
-        var pendingSettingsRefresh = false
         ImGui.separator()
+
+        val spacing = 30f
+        val minLeftWidth = 320f
+        val minRightWidth = 200f
+        val contentWidth = (WINDOW_W - NAV_W - 20f).coerceAtLeast(minLeftWidth + minRightWidth + spacing)
+
+        val usableWidth = contentWidth - spacing
+        val targetRightWidth = (usableWidth * 0.42f).coerceAtLeast(minRightWidth)
+        var rightColumnWidth = targetRightWidth.coerceAtMost(usableWidth - minLeftWidth)
+        var leftColumnWidth = usableWidth - rightColumnWidth
+
+        if (leftColumnWidth < minLeftWidth) {
+            leftColumnWidth = minLeftWidth
+            rightColumnWidth = usableWidth - leftColumnWidth
+        }
+        if (rightColumnWidth < minRightWidth) {
+            rightColumnWidth = minRightWidth
+            leftColumnWidth = (usableWidth - rightColumnWidth).coerceAtLeast(minLeftWidth)
+        }
+
+        if (ImGui.beginChild("OverviewLeftColumn", leftColumnWidth, 0f, false, 0)) {
+            drawOverviewLeftColumn(leftColumnWidth)
+        }
+        ImGui.endChild()
+
+        ImGui.sameLine(0f, spacing)
+
+        if (ImGui.beginChild("OverviewRightColumn", rightColumnWidth, 0f, false, 0)) {
+            drawOverviewRightColumn()
+        }
+        ImGui.endChild()
+
+    }
+
+    private fun drawOverviewLeftColumn(maxWidth: Float) {
+        var pendingSettingsRefresh = false
+
         ImGui.text("Target Tree:")
         ImGui.sameLine(0f, 6f)
+
         val allTrees = TreeTypes.ALL
         val currentIdx = script.settings.savedTreeType.coerceIn(0, allTrees.size - 1)
         val currentName = allTrees[currentIdx]
-        // Build (index, name, level?) triples
+
         data class TreeEntry(val idx: Int, val name: String, val level: Int?)
         fun levelFor(name: String): Int? =
             try {
                 resolveTreeType(name)?.levelReq
             } catch (_: Throwable) { null }
+
         val entries = allTrees.mapIndexed { i, n -> TreeEntry(i, n, levelFor(n)) }
-        // Sort by level when available; unknown levels follow in original order
         val known = entries.filter { it.level != null }.sortedBy { it.level!! }
         val unknown = entries.filter { it.level == null }
         val sorted = known + unknown
-        // Label helper: "[lvl] Name" when level known
+
         fun labelFor(e: TreeEntry): String = e.level?.let { "[${it}] ${e.name}" } ?: e.name
-        // Show current label with level when available
         val currentLabel = labelFor(TreeEntry(currentIdx, currentName, levelFor(currentName)))
+
         var treeChanged = false
         if (ImGui.beginCombo("##targetTreeCombo", currentLabel, 0)) {
             for (e in sorted) {
@@ -733,7 +769,6 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
             ImGui.endCombo()
         }
 
-        // Dynamic Location combo (options change with selected tree)
         val filtered = TreeLocations.locationsFor(script.targetTree).ifEmpty { script.treeLocations }
         if (treeChanged && filtered.none { it.name == script.location }) {
             val fallback = filtered.firstOrNull()?.name ?: script.treeLocations.firstOrNull()?.name ?: ""
@@ -741,9 +776,11 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
             script.settings.savedLocation = fallback
             pendingSettingsRefresh = true
         }
+
         val locationNames = filtered.map { it.name }
         val curLocName = script.location
         val curLocIdx = locationNames.indexOf(curLocName).coerceAtLeast(0)
+
         ImGui.text("Location:")
         ImGui.sameLine(0f, 6f)
         val shownLoc = if (locationNames.isNotEmpty()) locationNames.getOrElse(curLocIdx) { locationNames.first() } else "-"
@@ -764,7 +801,6 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
             pendingSettingsRefresh = false
         }
 
-        // Log handling mode
         val curLogIdx = script.settings.logHandlingMode.coerceIn(0, logHandlingOptions.lastIndex)
         ImGui.text("On logs:")
         ImGui.sameLine(0f, 6f)
@@ -780,7 +816,6 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
             ImGui.endCombo()
         }
 
-        // Keep UI buffers in sync when the selected location changes
         val curLoc = script.location
         if (coordUiLocName != curLoc) {
             coordUiLocName = curLoc
@@ -793,19 +828,24 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
                 val effBank = if (o?.bankX != null && o.bankY != null && o.bankZ != null) {
                     net.botwithus.rs3.world.Coordinate(o.bankX!!, o.bankY!!, o.bankZ!!)
                 } else sel?.bank
-                // Initialize text fields based on effective tiles
-                chopXYZText = if (effChop != null) "${effChop.x},${effChop.y},${effChop.z}" else ""
-                bankXYZText = if (effBank != null) "${effBank.x},${effBank.y},${effBank.z}" else ""
+                chopXYZText = effChop?.let { "${it.x()},${it.y()},${it.z()}" } ?: ""
+                bankXYZText = effBank?.let { "${it.x()},${it.y()},${it.z()}" } ?: ""
             } catch (_: Throwable) { }
         }
 
-        // When "Anywhere" is selected, expose Set buttons and manual coordinate entry under the dropdown
-        if (curLoc.equals("Anywhere", ignoreCase = true)) {
+        val locationLabel = curLoc.ifBlank { "Anywhere" }
+        if (locationLabel.equals("Anywhere", ignoreCase = true)) {
             ImGui.separator()
-            ImGui.text("Custom Coordinates (Anywhere)")
+            ImGui.text("Manual Coordinates")
+            ImGui.spacing()
 
-            // Chop: single text box + actions (buttons on next line to avoid overflow)
-            chopXYZText = ImGui.inputText("Chop", chopXYZText, 0)
+            ImGui.text("Override tiles for $locationLabel. Leave blank to use defaults.")
+            ImGui.spacing()
+
+            ImGui.text("Chop:")
+            ImGui.sameLine(0f, 6f)
+            chopXYZText = ImGui.inputText("##chop", chopXYZText, 0)
+            ImGui.sameLine(0f, 6f)
             if (ImGui.button("Apply##chop", 70f, 0f)) {
                 parseXYZ(chopXYZText)?.let { (x, y, z) ->
                     val map = script.settings.customLocations
@@ -843,7 +883,6 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
                 }
             }
 
-            // Bank: single text box + actions (buttons on next line to avoid overflow)
             bankXYZText = ImGui.inputText("Bank", bankXYZText, 0)
             if (ImGui.button("Apply##bank", 70f, 0f)) {
                 parseXYZ(bankXYZText)?.let { (x, y, z) ->
@@ -883,15 +922,36 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
             }
         }
 
-        ImGui.separator()
-        // Requirements (single section on Overview)
+        ImGui.spacing()
+        drawQueueSection()
+    }
+
+    private fun drawOverviewRightColumn() {
         ImGui.text("Requirements")
+        ImGui.separator()
+
         val treeType = resolveTreeType(script.targetTree)
         val reqLevel = treeType?.levelReq
-        ImGui.text("Recommended WC Level: ${reqLevel ?: "\u2014"}")
-        // Show user's WC level, colored green if >= recommended, else red
         val userWc = script.WCLevel
-        ImGui.text("Your WC Level:")
+
+        ImGui.text("Required Woodcutting Level:")
+        ImGui.sameLine(0f, 6f)
+        val requiredLevelText = reqLevel?.toString() ?: "\u2014"
+        if (reqLevel != null && userWc != null) {
+            val meetsRequirement = userWc >= reqLevel
+            val color = if (meetsRequirement) {
+                floatArrayOf(0.35f, 0.84f, 0.49f, 1f)
+            } else {
+                floatArrayOf(0.94f, 0.36f, 0.36f, 1f)
+            }
+            ImGui.pushStyleColor(ColorManager.ColorType.Text.index, color[0], color[1], color[2], color[3])
+            ImGui.text(requiredLevelText)
+            ImGui.popStyleColor(1)
+        } else {
+            ImGui.text(requiredLevelText)
+        }
+
+        ImGui.text("Woodcutting Level:")
         ImGui.sameLine(0f, 6f)
         when {
             userWc == null -> {
@@ -902,42 +962,44 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
             reqLevel == null -> {
                 ImGui.text(userWc.toString())
             }
-            userWc >= reqLevel -> {
-                ImGui.pushStyleColor(ColorManager.ColorType.Text.index, 0.35f, 0.84f, 0.49f, 1f) // green
+            userWc >= (reqLevel ?: -1) -> {
+                ImGui.pushStyleColor(ColorManager.ColorType.Text.index, 0.35f, 0.84f, 0.49f, 1f)
                 ImGui.text(userWc.toString())
                 ImGui.popStyleColor(1)
             }
             else -> {
-                ImGui.pushStyleColor(ColorManager.ColorType.Text.index, 0.94f, 0.36f, 0.36f, 1f) // red
+                ImGui.pushStyleColor(ColorManager.ColorType.Text.index, 0.94f, 0.36f, 0.36f, 1f)
                 ImGui.text(userWc.toString())
                 ImGui.popStyleColor(1)
             }
         }
 
-        // Configured tiles checks
-        run {
-            val curLoc = script.location
-            // Chop
-            val effChop = try {
-                val sel = script.treeLocations.firstOrNull { it.name == curLoc }
-                val o = script.settings.customLocations[curLoc]
-                if (o?.chopX != null && o.chopY != null && o.chopZ != null) net.botwithus.rs3.world.Coordinate(o.chopX!!, o.chopY!!, o.chopZ!!) else sel?.chop
-            } catch (_: Throwable) { null }
-            drawStatusLine("Configured chop tile?", effChop != null)
+        ImGui.text("Tree Selected:")
+        ImGui.sameLine(0f, 6f)
+        ImGui.pushStyleColor(ColorManager.ColorType.Text.index, 0.35f, 0.84f, 0.49f, 1f)
+        ImGui.text(script.targetTree.ifBlank { "-" })
+        ImGui.popStyleColor(1)
 
-            // Bank
-            val effBank = try {
-                val sel = script.treeLocations.firstOrNull { it.name == curLoc }
-                val o = script.settings.customLocations[curLoc]
-                if (o?.bankX != null && o.bankY != null && o.bankZ != null) net.botwithus.rs3.world.Coordinate(o.bankX!!, o.bankY!!, o.bankZ!!) else sel?.bank
-            } catch (_: Throwable) { null }
-            drawStatusLine("Configured bank tile?", effBank != null)
-        }
-
-        // No Inventory Hints or Bank/Chop sections on Overview per request
-
+        ImGui.spacing()
         ImGui.separator()
-        drawQueueSection()
+        ImGui.text("Readiness Checks")
+        ImGui.separator()
+
+        val curLoc = script.location
+        val effChop = try {
+            val sel = script.treeLocations.firstOrNull { it.name == curLoc }
+            val o = script.settings.customLocations[curLoc]
+            if (o?.chopX != null && o.chopY != null && o.chopZ != null) net.botwithus.rs3.world.Coordinate(o.chopX!!, o.chopY!!, o.chopZ!!) else sel?.chop
+        } catch (_: Throwable) { null }
+        drawStatusLine("Configured chop tile?", effChop != null)
+
+        val effBank = try {
+            val sel = script.treeLocations.firstOrNull { it.name == curLoc }
+            val o = script.settings.customLocations[curLoc]
+            if (o?.bankX != null && o.bankY != null && o.bankZ != null) net.botwithus.rs3.world.Coordinate(o.bankX!!, o.bankY!!, o.bankZ!!) else sel?.bank
+        } catch (_: Throwable) { null }
+        drawStatusLine("Configured bank tile?", effBank != null)
+
     }
 
     private fun drawQueueSection() {
@@ -951,6 +1013,15 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
             script.setQueueEnabled(toggledQueueEnabled)
             snapshot = script.queueSnapshot()
         }
+
+        if (!snapshot.enabled) {
+            ImGui.separator()
+            ImGui.pushStyleColor(ColorManager.ColorType.Text.index, 0.75f, 0.75f, 0.75f, 1f)
+            ImGui.text("Enable the queue to add jobs and view scheduled work.")
+            ImGui.popStyleColor(1)
+            return
+        }
+
         ImGui.sameLine(0f, -1f)
         if (ImGui.button("Reset Progress", 140f, 0f)) {
             script.resetEntireQueueProgress()
@@ -982,7 +1053,7 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
         val logMode = script.settings.logHandlingMode.coerceIn(0, logHandlingOptions.lastIndex)
         val handlingLabel = logHandlingOptions[logMode]
 
-        ImGui.text("Next job will use ${selectedTree.ifBlank { "â€”" }} @ ${displayedLocation.ifBlank { "â€”" }} ($handlingLabel)")
+        ImGui.text("Next job will use ${selectedTree.ifBlank { "—" }} @ ${displayedLocation.ifBlank { "—" }} ($handlingLabel)")
 
         val updatedGoal = ImGui.inputInt("Logs to chop", queueGoalInput, 100, 500, 0)
         if (updatedGoal != queueGoalInput) {
@@ -1026,10 +1097,10 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
             ImGui.popStyleColor(1)
             return
         }
-
-        val rowsVisible = snapshot.entries.size.coerceAtMost(4)
-        val rowHeight = 88f
-        val listHeight = (rowsVisible * rowHeight + 28f).coerceAtLeast(140f)
+        val rowsVisible = snapshot.entries.size
+        val rowHeight = 72f
+        val baseHeight = (rowsVisible * rowHeight + 28f).coerceAtLeast(140f)
+        val listHeight = baseHeight.coerceAtMost(260f)
         val childOpen = ImGui.beginChild("QueueList", 0f, listHeight, true, 0)
         if (childOpen) {
             snapshot.entries.forEachIndexed { index, entry ->
@@ -1612,6 +1683,10 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
     }
 
 }
+
+
+
+
 
 
 
