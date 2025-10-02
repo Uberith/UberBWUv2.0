@@ -4,6 +4,5 @@
     <mapping directory="" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/../BWU-V2-XAPI-KT" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/../BotWithUs-V2-XAPI" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/temp_remote_repo3" vcs="Git" />
   </component>
 </project>

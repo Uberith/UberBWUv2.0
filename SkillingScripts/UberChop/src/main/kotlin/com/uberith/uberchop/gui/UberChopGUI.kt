@@ -842,11 +842,16 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
             ImGui.text("Override tiles for $locationLabel. Leave blank to use defaults.")
             ImGui.spacing()
 
+            val labelSpacing = 6f
+            val buttonSpacing = 6f
+            val buttonWidth = ((maxWidth - buttonSpacing) * 0.5f).coerceAtLeast(0f)
+
             ImGui.text("Chop:")
-            ImGui.sameLine(0f, 6f)
+            ImGui.sameLine(0f, labelSpacing)
             chopXYZText = ImGui.inputText("##chop", chopXYZText, 0)
-            ImGui.sameLine(0f, 6f)
-            if (ImGui.button("Apply##chop", 70f, 0f)) {
+            ImGui.newLine()
+
+            if (ImGui.button("Apply##chop", buttonWidth, 0f)) {
                 parseXYZ(chopXYZText)?.let { (x, y, z) ->
                     val map = script.settings.customLocations
                     val cur = map[curLoc] ?: com.uberith.uberchop.config.CustomLocation()
@@ -855,8 +860,8 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
                     script.onSettingsChanged()
                 }
             }
-            ImGui.sameLine(0f, 6f)
-            if (ImGui.button("Use Player##chop", 110f, 0f)) {
+            ImGui.sameLine(0f, buttonSpacing)
+            if (ImGui.button("Use Player##chop", buttonWidth, 0f)) {
                 try {
                     val cls = Class.forName("net.botwithus.rs3.entities.LocalPlayer")
                     val me = cls.getMethod("self").invoke(null)
@@ -883,8 +888,12 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
                 }
             }
 
-            bankXYZText = ImGui.inputText("Bank", bankXYZText, 0)
-            if (ImGui.button("Apply##bank", 70f, 0f)) {
+            ImGui.text("Bank:")
+            ImGui.sameLine(0f, labelSpacing)
+            bankXYZText = ImGui.inputText("##bank", bankXYZText, 0)
+            ImGui.newLine()
+
+            if (ImGui.button("Apply##bank", buttonWidth, 0f)) {
                 parseXYZ(bankXYZText)?.let { (x, y, z) ->
                     val map = script.settings.customLocations
                     val cur = map[curLoc] ?: com.uberith.uberchop.config.CustomLocation()
@@ -893,8 +902,8 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
                     script.onSettingsChanged()
                 }
             }
-            ImGui.sameLine(0f, 6f)
-            if (ImGui.button("Use Player##bank", 110f, 0f)) {
+            ImGui.sameLine(0f, buttonSpacing)
+            if (ImGui.button("Use Player##bank", buttonWidth, 0f)) {
                 try {
                     val cls = Class.forName("net.botwithus.rs3.entities.LocalPlayer")
                     val me = cls.getMethod("self").invoke(null)
@@ -912,6 +921,7 @@ class UberChopGUI(private val script: UberChop) : ImGuiUI() {
                     }
                 } catch (_: Throwable) { }
             }
+
             run {
                 val valid = bankXYZText.isBlank() || parseXYZ(bankXYZText) != null
                 if (!valid) {
