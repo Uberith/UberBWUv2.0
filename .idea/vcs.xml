@@ -3,6 +3,7 @@
   <component name="VcsDirectoryMappings">
     <mapping directory="" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/../BWU-V2-XAPI-KT" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/../BWU-V2-XAPI-KT/tmp/UberBWUv2" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/../BotWithUs-V2-XAPI" vcs="Git" />
   </component>
 </project>
